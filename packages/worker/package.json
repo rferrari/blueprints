@@ -1,0 +1,21 @@
+{
+    "name": "@eliza-manager/worker",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "tsx src/index.ts",
+        "build": "tsc",
+        "start": "node dist/src/index.js"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.93.2",
+        "axios": "^1.7.9",
+        "dotenv": "^16.4.7"
+    },
+    "devDependencies": {
+        "@types/node": "^24.10.1",
+        "tsx": "^4.19.2",
+        "typescript": "^5.9.3"
+    }
+}

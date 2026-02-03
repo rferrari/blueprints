@@ -31,3 +31,5 @@ dist-ssr
 .next/
 .turbo/
 
+workspaces/*
+external/*

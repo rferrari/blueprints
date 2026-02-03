@@ -34,7 +34,7 @@ export default function DashboardPage() {
 
     useEffect(() => {
         checkBackendHealth();
-        const interval = setInterval(checkBackendHealth, 30000); // Check every 30s
+        const interval = setInterval(checkBackendHealth, 60000); // Check every 60s
         return () => clearInterval(interval);
     }, [API_URL]);
 

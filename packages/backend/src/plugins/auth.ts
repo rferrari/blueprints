@@ -26,7 +26,7 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
         }
 
         request.userId = user.id;
-        fastify.log.info({ userId: user.id, url: request.url }, 'Auth successful');
+        fastify.log.debug({ userId: user.id, url: request.url }, 'Auth successful');
     });
 };
 

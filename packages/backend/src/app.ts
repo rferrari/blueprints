@@ -8,8 +8,17 @@ import projectRoutes from './routes/projects';
 import agentRoutes from './routes/agents';
 
 const fastify = Fastify({
+    disableRequestLogging: true, // Reduce noise: standard incoming/completed logs moved to debug
     logger: {
-        level: 'info',
+        level: process.env.LOG_LEVEL || 'info',
+        transport: {
+            target: 'pino-pretty',
+            options: {
+                colorize: true,
+                translateTime: 'HH:MM:ss',
+                ignore: 'pid,hostname',
+            },
+        },
         serializers: {
             req: (req) => ({ method: req.method, url: req.url }),
             res: (res) => ({ statusCode: res.statusCode })
@@ -26,14 +35,23 @@ fastify.setErrorHandler((error: any, request, reply) => {
         path: request.url,
         code: error.code,
         details: error.details,
+        hint: error.hint, // PostgREST often provides hints
+        fullError: isSupabaseError ? error : undefined,
         isDatabaseError: isSupabaseError
     }, 'Critical Request Error');
 
     // Beautify the response if it's a DB error
     if (isSupabaseError) {
+        if (error.code === 'PGRST205') {
+            return reply.status(500).send({
+                error: 'Database Schema Cache Error',
+                message: 'Supabase column cache is out of sync. Please run "NOTIFY pgrst, \'reload schema\';" in your SQL Editor.',
+                code: error.code
+            });
+        }
         return reply.status(500).send({
-            error: 'Database Schema Sync Error',
-            message: `The server is out of sync with the database: ${error.message}`,
+            error: 'Database Error',
+            message: `Supabase returned an error: ${error.message}`,
             code: error.code
         });
     }
@@ -60,7 +78,7 @@ await fastify.register(supabasePlugin, {
 });
 
 // Register routes
-fastify.get('/health', async () => {
+fastify.get('/health', { logLevel: 'silent' }, async () => {
     return { status: 'ok' };
 });
 

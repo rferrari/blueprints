@@ -27,6 +27,7 @@ create table if not exists public.agents (
     project_id uuid references public.projects(id) on delete cascade not null,
     name text not null,
     version text default 'latest',
+    framework text default 'eliza', -- 'eliza', 'openclaw'
     template_id text, -- ID of the functional template used
     created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -46,6 +47,7 @@ create table if not exists public.agent_actual_state (
     status text default 'stopped', -- 'stopped', 'starting', 'running', 'error'
     last_sync timestamp with time zone,
     runtime_id uuid references public.runtimes(id) on delete set null,
+    endpoint_url text,
     error_message text
 );
 

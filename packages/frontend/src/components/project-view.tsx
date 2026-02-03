@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bot, Save, X, Plus, Skull, Play, Square, User, AlertCircle, Loader2, ShieldCheck, Zap, Activity, Cpu, Database, MessageSquare } from 'lucide-react';
+import { Bot, Save, X, Plus, Skull, Play, Square, User, AlertCircle, Loader2, ShieldCheck, Zap, Activity, Cpu, Database, MessageSquare, Terminal } from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
 import AgentEditor from '@/components/agent-editor';
+import OpenClawWizard from '@/components/openclaw-wizard';
 import ChatInterface from '@/components/chat-interface';
 import ConfirmationModal from '@/components/confirmation-modal';
 
@@ -22,20 +23,21 @@ export default function ProjectView({ projectId }: { projectId: string }) {
     const [loading, setLoading] = useState(true);
     const [isAdding, setIsAdding] = useState(false);
     const [newAgentName, setNewAgentName] = useState('');
+    const [newAgentFramework, setNewAgentFramework] = useState<'eliza' | 'openclaw'>('eliza');
     const [editingAgent, setEditingAgent] = useState<any | null>(null);
     const [chattingAgentId, setChattingAgentId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [lastCreatedAgentId, setLastCreatedAgentId] = useState<string | null>(null);
 
     const [purgeModal, setPurgeModal] = useState<{ isOpen: boolean; agentId: string | null }>({
         isOpen: false,
         agentId: null
     });
 
-    const fetchProjectAndAgents = useCallback(async () => {
+    const fetchProjectAndAgents = useCallback(async (isInitial = false) => {
         if (!session?.access_token) return;
         try {
-            // setError(null); // Optional: clear on every fetch start
-            setLoading(true);
+            if (isInitial) setLoading(true);
             const pRes = await fetch(`${API_URL}/projects/${projectId}`, {
                 headers: { 'Authorization': `Bearer ${session.access_token}` },
                 cache: 'no-store'
@@ -61,14 +63,25 @@ export default function ProjectView({ projectId }: { projectId: string }) {
         } finally {
             setLoading(false);
         }
-    }, [projectId, session, editingAgent]);
+    }, [projectId, session]);
 
     useEffect(() => {
-        fetchProjectAndAgents();
-        // Standard refresh
-        const interval = setInterval(fetchProjectAndAgents, 10000);
+        fetchProjectAndAgents(true);
+        // Standard refresh - don't show spinner on background cycles
+        const interval = setInterval(() => fetchProjectAndAgents(false), 20000);
         return () => clearInterval(interval);
     }, [fetchProjectAndAgents]);
+
+    // Auto-open wizard/editor for new agents
+    useEffect(() => {
+        if (lastCreatedAgentId && agents.length > 0) {
+            const newAgent = agents.find((a: any) => a.id === lastCreatedAgentId);
+            if (newAgent) {
+                setEditingAgent(newAgent);
+                setLastCreatedAgentId(null);
+            }
+        }
+    }, [lastCreatedAgentId, agents]);
 
     // Fast refresh for countdowns
     const [, setTick] = useState(0);
@@ -86,16 +99,21 @@ export default function ProjectView({ projectId }: { projectId: string }) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${session.access_token}`
                 },
-                body: JSON.stringify({ name: newAgentName })
+                body: JSON.stringify({
+                    name: newAgentName,
+                    framework: newAgentFramework
+                })
             });
             if (!res.ok) {
                 const errData = await res.json();
                 throw new Error(errData.message || 'Failed to install agent');
             }
+            const data = await res.json();
+            setLastCreatedAgentId(data.id);
             await fetchProjectAndAgents();
             setIsAdding(false);
             setNewAgentName('');
-            setError(null); // Clear any previous errors
+            setError(null);
         } catch (err: any) {
             setError(err.message);
         }
@@ -239,12 +257,20 @@ export default function ProjectView({ projectId }: { projectId: string }) {
     return (
         <div className="space-y-12 pb-20">
             {editingAgent && (
-                <AgentEditor
-                    agent={editingAgent}
-                    actual={agents.find(a => a.id === editingAgent.id)?.agent_actual_state?.[0] || { status: 'stopped' }}
-                    onSave={saveAgentConfig}
-                    onClose={() => setEditingAgent(null)}
-                />
+                editingAgent.framework === 'openclaw' ? (
+                    <OpenClawWizard
+                        agent={editingAgent}
+                        onSave={saveAgentConfig}
+                        onClose={() => setEditingAgent(null)}
+                    />
+                ) : (
+                    <AgentEditor
+                        agent={editingAgent}
+                        actual={agents.find(a => a.id === editingAgent.id)?.agent_actual_state?.[0] || { status: 'stopped' }}
+                        onSave={saveAgentConfig}
+                        onClose={() => setEditingAgent(null)}
+                    />
+                )
             )}
 
             {chattingAgentId && (
@@ -352,8 +378,30 @@ export default function ProjectView({ projectId }: { projectId: string }) {
                                 value={newAgentName}
                                 onChange={(e) => setNewAgentName(e.target.value)}
                                 className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 focus:border-primary/50 outline-none transition-all font-bold placeholder:text-muted-foreground/30"
-                                placeholder="e.g. Satoshi, Alpha Trader"
                             />
+                        </div>
+                        <div className="group">
+                            <label className="block text-sm font-black text-muted-foreground uppercase tracking-widest mb-2 ml-1 transition-colors group-focus-within:text-primary">Intelligence Framework</label>
+                            <div className="grid grid-cols-2 gap-4">
+                                <button
+                                    onClick={() => setNewAgentFramework('eliza')}
+                                    className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 ${newAgentFramework === 'eliza'
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'}`}
+                                >
+                                    <Bot size={24} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">ElizaOS</span>
+                                </button>
+                                <button
+                                    onClick={() => setNewAgentFramework('openclaw')}
+                                    className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 ${newAgentFramework === 'openclaw'
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-white/10 bg-white/5 text-muted-foreground hover:bg-white/10'}`}
+                                >
+                                    <Terminal size={24} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">OpenClaw</span>
+                                </button>
+                            </div>
                         </div>
                         <div className="flex gap-4">
                             <button
@@ -437,6 +485,8 @@ export default function ProjectView({ projectId }: { projectId: string }) {
                                         </div>
                                         <div className="flex items-center gap-4 text-[10px] font-black uppercase tracking-widest">
                                             <span className={actual.status === 'running' ? 'text-green-500' : 'text-muted-foreground'}>{actual.status}</span>
+                                            <span className="text-white/20">•</span>
+                                            <span className="text-muted-foreground/50">Framework: {agent.framework || 'eliza'}</span>
                                             <span className="text-white/20">•</span>
                                             {purgeStatus ? (
                                                 <button

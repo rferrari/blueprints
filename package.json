@@ -9,8 +9,11 @@
     "dev:frontend": "bun run --cwd packages/frontend dev",
     "dev:backend": "bun run --cwd packages/backend dev",
     "dev:worker": "bun run --cwd packages/worker dev",
-    "build": "bun run build --workspaces",
-    "lint": "bun run lint --workspaces"
+    "start:all": "bun x concurrently \"bun dev:frontend\" \"bun dev:backend\" \"bun dev:worker\"",
+    "build:all": "bun run --cwd packages/shared build && bun --workspaces run build",
+    "rebuild:all": "bun install && bun run build:all",
+    "build": "bun --workspaces run build",
+    "lint": "bun --workspaces run lint"
   },
   "devDependencies": {
     "@elizaos/cli": "^1.7.2",

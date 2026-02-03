@@ -66,7 +66,7 @@ function LoginPageContent() {
                             </div>
                         </div>
                         <h1 className="text-4xl font-black tracking-tight mb-3">
-                            Eliza <span className="text-transparent bg-clip-text bg-gradient-unicorn">Manager</span>
+                            Blue<span className="text-transparent bg-clip-text bg-gradient-unicorn">prints</span>
                         </h1>
                         <p className="text-muted-foreground font-medium text-lg max-w-[280px]">
                             The future of AI orchestration starts here.

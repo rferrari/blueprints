@@ -82,3 +82,6 @@ To run linting across all packages:
 bun run lint
 # Runs: bun run lint --workspaces
 ```
+## Documentation
+
+- [OpenClaw Integration Walkthrough](docs/openclaw-integration.md)

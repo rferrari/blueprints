@@ -1,12 +1,12 @@
 import { FastifyPluginAsync } from 'fastify';
-import { UpdateAgentConfigSchema } from '@eliza-manager/shared';
+import { UpdateAgentConfigSchema, CreateAgentSchema } from '@eliza-manager/shared';
 
 const agentRoutes: FastifyPluginAsync = async (fastify) => {
 
     // List agents for a project
     fastify.get('/project/:projectId', async (request) => {
         const { projectId } = request.params as { projectId: string };
-        fastify.log.info({ userId: request.userId, projectId }, 'Attempting to fetch agents for project');
+        fastify.log.debug({ userId: request.userId, projectId }, 'Attempting to fetch agents for project');
 
         // Verify project ownership
         const { data: project, error: pError } = await fastify.supabase
@@ -37,7 +37,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
     // Create/Install agent in a project
     fastify.post('/project/:projectId', async (request, reply) => {
         const { projectId } = request.params as { projectId: string };
-        const { name, configTemplate, templateId } = request.body as { name: string, configTemplate?: any, templateId?: string };
+        const { name, configTemplate, templateId, framework } = CreateAgentSchema.parse(request.body);
 
         // Verify project ownership
         const { data: project, error: pError } = await fastify.supabase
@@ -65,7 +65,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
             return reply.unauthorized('User identity lost');
         }
 
-        fastify.log.info({ userId: request.userId, projectId, name }, 'Attempting to create agent');
+        fastify.log.info({ userId: request.userId, projectId, name, framework }, 'Attempting to create agent');
 
         // Check agent limits
         const { count } = await fastify.supabase
@@ -79,22 +79,34 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         // 1. Create agent
-        fastify.log.info({ projectId, name }, 'Inserting new agent into database');
+        fastify.log.info({ projectId, name, framework }, 'Inserting new agent into database');
         const { data: agent, error: agentError } = await fastify.supabase
             .from('agents')
-            .insert([{ project_id: projectId, name }])
+            .insert([{ project_id: projectId, name, framework: framework || 'eliza' }])
             .select()
             .single();
 
         if (agentError) throw agentError;
 
         // 2. Initialize desired state
-        const initialConfig = configTemplate || {
+        const initialConfig = configTemplate || (framework === 'openclaw' ? {
+            auth: {
+                profiles: {
+                    default: { provider: 'anthropic', mode: 'api_key', token: '' }
+                }
+            },
+            gateway: {
+                auth: { mode: 'token', token: Buffer.from(Math.random().toString()).toString('base64').substring(0, 16) }
+            },
+            agents: {
+                defaults: { workspace: '/home/node/.openclaw' }
+            }
+        } : {
             name,
             modelProvider: 'openai',
             bio: [`I am ${name}, a new AI agent.`],
             plugins: ['@elizaos/plugin-bootstrap']
-        };
+        });
 
         const { error: stateError } = await fastify.supabase
             .from('agent_desired_state')
@@ -141,11 +153,11 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
         if (enabled !== undefined) updates.enabled = enabled;
         if (config !== undefined) updates.config = config;
         if (purge_at !== undefined) {
-            fastify.log.info({ agentId, purge_at }, 'Processing purge_at update');
+            fastify.log.debug({ agentId, purge_at }, 'Processing purge_at update');
             updates.purge_at = purge_at;
         }
 
-        fastify.log.info({ agentId, updates }, 'Executing desired state update');
+        fastify.log.debug({ agentId, updates }, 'Executing desired state update');
 
         const { data, error } = await fastify.supabase
             .from('agent_desired_state')
@@ -198,7 +210,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
         // Verify agent ownership via project
         const { data: agent } = await fastify.supabase
             .from('agents')
-            .select('project_id')
+            .select('project_id, framework')
             .eq('id', agentId)
             .single();
 
@@ -227,14 +239,62 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
 
         if (userMsgError) throw userMsgError;
 
-        // 2. Here we would typically proxy to the Actual Runtime
-        // For now, we simulate an agent response
+        let agentResponseContent = `Response from agent regarding: ${content}`;
+
+        if (agent.framework === 'openclaw') {
+            const { data: actual } = await fastify.supabase
+                .from('agent_actual_state')
+                .select('endpoint_url')
+                .eq('agent_id', agentId)
+                .single();
+
+            const { data: desired } = await fastify.supabase
+                .from('agent_desired_state')
+                .select('config')
+                .eq('agent_id', agentId)
+                .single();
+
+            fastify.log.info({ agentId, hasEndpoint: !!actual?.endpoint_url, hasConfig: !!desired?.config }, 'OpenClaw Proxy Check');
+
+            if (actual?.endpoint_url && desired?.config) {
+                fastify.log.info({ agentId, endpoint: actual.endpoint_url }, 'Proxying to OpenClaw gateway...');
+                const config = desired.config as any;
+                const token = config.gateway?.auth?.token;
+
+                try {
+                    const response = await fetch(`${actual.endpoint_url}/v1/chat/completions`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            model: 'openclaw',
+                            messages: [{ role: 'user', content }]
+                        })
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json() as any;
+                        agentResponseContent = result.choices?.[0]?.message?.content || agentResponseContent;
+                    } else {
+                        fastify.log.error({ status: response.status, agentId }, 'OpenClaw proxy failed');
+                        agentResponseContent = `Error: OpenClaw agent returned ${response.status}`;
+                    }
+                } catch (err: any) {
+                    fastify.log.error({ err, agentId }, 'Failed to proxy to OpenClaw');
+                    agentResponseContent = `Error: Could not reach OpenClaw agent at ${actual.endpoint_url}`;
+                }
+            }
+        }
+
+        // 2. Store agent message
         const { data: agentMsg, error: agentMsgError } = await fastify.supabase
             .from('agent_conversations')
             .insert([{
                 agent_id: agentId,
                 user_id: request.userId,
-                content: `Response from agent regarding: ${content}`,
+                content: agentResponseContent,
                 sender: 'agent'
             }])
             .select()

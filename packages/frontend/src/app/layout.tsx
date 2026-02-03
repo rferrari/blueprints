@@ -6,8 +6,8 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit' });
 
 export const metadata: Metadata = {
-    title: 'Eliza Manager | Next-Gen AI Orchestration',
-    description: 'The ultimate SaaS platform for managing autonomous ElizaOS agents.',
+    title: 'Blueprints | AI Launchpad',
+    description: 'Launch and Manage AI Agents',
 };
 
 import { AuthProvider } from '@/components/auth-provider';

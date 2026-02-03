@@ -34,7 +34,7 @@ export default function SignupPage() {
             } else if (error.message.includes('Password should be at least 6 characters')) {
                 setError('Password is too short. Please use at least 6 characters.');
             }
-             else {
+            else {
                 setError(error.message);
             }
         } else {
@@ -142,7 +142,7 @@ export default function SignupPage() {
                 </div>
 
                 <div className="mt-8 text-center">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/20">Powered by advanced agentic intelligence</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/20">Powered by Blankspace Agentic Intelligence</p>
                 </div>
             </div>
         </div>

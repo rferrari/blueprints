@@ -64,7 +64,7 @@ export default function LandingPage() {
                                 <Bot size={20} className="text-white" />
                             </div>
                         </div>
-                        <span className="text-xl font-black tracking-tighter uppercase">Eliza <span className="text-primary">OS</span></span>
+                        <span className="text-xl font-black tracking-tighter uppercase">Blue<span className="text-primary">prints</span></span>
                     </div>
 
                     <div className="flex items-center gap-8">
@@ -213,7 +213,7 @@ export default function LandingPage() {
                 <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
                     <div className="flex items-center gap-3 opacity-50">
                         <Bot size={24} />
-                        <span className="text-lg font-black tracking-tighter uppercase">Eliza <span className="text-primary">OS</span></span>
+                        <span className="text-lg font-black tracking-tighter uppercase">Blue<span className="text-primary">prints</span></span>
                     </div>
 
                     <div className="flex gap-12 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
@@ -223,7 +223,7 @@ export default function LandingPage() {
                     </div>
 
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-30">
-                        &copy; 2026 ElizaOS Manager Cluster.
+                        &copy; 2026 Blueprints Manager Cluster. Powered by Blankspace
                     </p>
                 </div>
             </footer>

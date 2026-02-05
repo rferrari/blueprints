@@ -411,7 +411,7 @@ async function startOpenClawAgent(agentId: string, config: any) {
             User: `${uid}:${gid}`,
             name: containerName,
             Env: env,
-            Cmd: ['node', 'dist/index.js', 'gateway', '--preconfigured', '--bind', 'lan'],
+            Cmd: ['node', 'dist/index.js', 'gateway', '--bind', 'lan'],
             ExposedPorts: {
                 '18789/tcp': {}
             },

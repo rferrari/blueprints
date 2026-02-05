@@ -438,7 +438,7 @@ async function startOpenClawAgent(agentId: string, config: any) {
             },
             NetworkingConfig: {
                 EndpointsConfig: {
-                    [process.env.DOCKER_NETWORK_NAME || 'blueprints_blueprints-network']: {}
+                    [process.env.DOCKER_NETWORK_NAME || 'blueprints-network']: {}
                 }
             }
         });
@@ -560,24 +560,41 @@ async function handleUserMessage(payload: any) {
 
             logger.info(`Message Bus: Calling agent at ${agentUrl}`);
 
-            try {
-                const res = await axios.post(`${agentUrl}/v1/chat/completions`, {
-                    model: 'openclaw',
-                    messages: [{ role: 'user', content }]
-                }, {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                        'x-openclaw-agent-id': 'main',
-                        'Connection': 'close' // Force close to avoid socket hangup/reuse issues in Bun
-                    }
-                });
+            let attempts = 0;
+            const maxAttempts = 5;
+            let success = false;
 
-                const result = res.data;
-                agentResponseContent = result.choices?.[0]?.message?.content || agentResponseContent;
-            } catch (err: any) {
-                logger.error(`Message Bus: OpenClaw agent error (${err.status || err.message})`);
-                agentResponseContent = `Error: Agent returned status ${err.status || err.message}`;
+            while (attempts < maxAttempts && !success) {
+                attempts++;
+                try {
+                    const res = await axios.post(`${agentUrl}/v1/chat/completions`, {
+                        model: 'openclaw',
+                        messages: [{ role: 'user', content }]
+                    }, {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`,
+                            'x-openclaw-agent-id': 'main',
+                            'Connection': 'close'
+                        },
+                        timeout: 10000
+                    });
+
+                    const result = res.data;
+                    agentResponseContent = result.choices?.[0]?.message?.content || agentResponseContent;
+                    success = true;
+                } catch (err: any) {
+                    const isConnRefused = err.code === 'ECONNREFUSED' || err.message?.includes('Unable to connect');
+
+                    if (isConnRefused && attempts < maxAttempts) {
+                        logger.warn(`Message Bus: Connection refused (Agent starting?). Retrying attempt ${attempts}/${maxAttempts} in 1s...`);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    } else {
+                        logger.error(`Message Bus: OpenClaw agent error (${err.status || err.message}) on attempt ${attempts}`);
+                        agentResponseContent = `Error: Agent returned status ${err.status || err.message}`;
+                        break; // Exit loop on non-connection errors or max attempts
+                    }
+                }
             }
         } else {
             // Placeholder for other frameworks (Eliza, etc.)

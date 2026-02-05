@@ -23,7 +23,7 @@ const logger = {
 const dockerSocket = { socketPath: '/var/run/docker.sock' };
 const dockerApi = axios.create({
     ...dockerSocket,
-    baseURL: 'http://localhost/v1.41'
+    baseURL: 'http://localhost'
 });
 
 const docker = {

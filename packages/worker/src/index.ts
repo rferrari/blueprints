@@ -364,14 +364,15 @@ async function startOpenClawAgent(agentId: string, config: any) {
             // Container doesn't exist, proceed to create
         }
 
-        // Setup workspace directory in project root
+        // Setup workspace directory with .openclaw subdirectory
         const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
-        if (!fs.existsSync(workspacePath)) {
-            fs.mkdirSync(workspacePath, { recursive: true });
+        const openclawDir = path.join(workspacePath, '.openclaw');
+        if (!fs.existsSync(openclawDir)) {
+            fs.mkdirSync(openclawDir, { recursive: true });
         }
 
-        // Write config to file in workspace
-        const configPath = path.join(workspacePath, 'openclaw.json');
+        // Write config to .openclaw subdirectory
+        const configPath = path.join(openclawDir, 'openclaw.json');
 
         // Ensure OpenAI bridge is enabled for the message bus to work
         const finalConfig = {
@@ -390,10 +391,9 @@ async function startOpenClawAgent(agentId: string, config: any) {
 
         // Setup environment variables
         const env = [
-            `HOME=/home/node`, // Force HOME so OpenClaw finds config at /home/node/.openclaw/openclaw.json
             `OPENCLAW_AGENT_ID=${agentId}`,
-            `OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw`,
-            `OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json`
+            `OPENCLAW_WORKSPACE_DIR=/root/.openclaw`,
+            `OPENCLAW_CONFIG_PATH=/root/.openclaw/openclaw.json`
         ];
 
         // Ensure gateway token is set for worker-agent communication if provided in config
@@ -418,7 +418,7 @@ async function startOpenClawAgent(agentId: string, config: any) {
             },
             HostConfig: {
                 Binds: [
-                    `${workspacePath}:/home/node/.openclaw`
+                    `${openclawDir}:/root/.openclaw`
                 ],
                 PortBindings: {
                     '18789/tcp': [{ HostPort: hostPort.toString() }]

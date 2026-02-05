@@ -20,16 +20,27 @@ fi
 echo "📥 Cloning OpenClaw ($OPENCLAW_VERSION)..."
 git clone --depth 1 -b $OPENCLAW_VERSION https://github.com/openclaw/openclaw.git "$TARGET_DIR"
 
-# 3. Build OpenClaw (optional but recommended here so it's ready in the layer)
+# 3. Build OpenClaw
 echo "📦 Building OpenClaw..."
 cd "$TARGET_DIR"
-# Ensure pnpm is available as some OpenClaw scripts might need it
+
+# Ensure pnpm is available
 if ! command -v pnpm &> /dev/null; then
     echo "📦 Installing pnpm..."
-    npm install -g pnpm
+    npm install -g pnpm || sudo npm install -g pnpm
 fi
-bun install
-bun run build
+
+# Detect Bun path for sudo environments
+BUN_BIN=$(command -v bun || echo "$HOME/.bun/bin/bun")
+
+if [ ! -f "$BUN_BIN" ]; then
+    echo "🛑 Bun not found! Please install Bun first."
+    exit 1
+fi
+
+echo "Using Bun: $BUN_BIN"
+$BUN_BIN install
+$BUN_BIN run build
 
 # 4. Build Docker Image
 echo "🐳 Building Docker image openclaw:local..."

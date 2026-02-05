@@ -56,7 +56,7 @@ alter table public.projects enable row level security;
 alter table public.agents enable row level security;
 alter table public.agent_desired_state enable row level security;
 alter table public.agent_actual_state enable row level security;
--- runtimes is admin-only for now
+alter table public.runtimes enable row level security;
 
 -- Policies
 create policy "Users can see their own projects" on public.projects

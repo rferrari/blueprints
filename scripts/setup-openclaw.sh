@@ -23,6 +23,11 @@ git clone --depth 1 -b $OPENCLAW_VERSION https://github.com/openclaw/openclaw.gi
 # 3. Build OpenClaw (optional but recommended here so it's ready in the layer)
 echo "📦 Building OpenClaw..."
 cd "$TARGET_DIR"
+# Ensure pnpm is available as some OpenClaw scripts might need it
+if ! command -v pnpm &> /dev/null; then
+    echo "📦 Installing pnpm..."
+    npm install -g pnpm
+fi
 bun install
 bun run build
 

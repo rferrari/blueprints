@@ -307,7 +307,10 @@ async function startOpenClawAgent(agentId: string, config: any) {
         // Deterministic port mapping: 19000 + (hash of agentId % 1000)
         const hash = agentId.split('-').reduce((acc, part) => acc + parseInt(part, 16), 0);
         const hostPort = 19000 + (hash % 1000);
-        const endpointUrl = `http://localhost:${hostPort}`;
+
+        // Use VPS_PUBLIC_IP if set, otherwise fallback to localhost for standalone/dev
+        const vpsIp = process.env.VPS_PUBLIC_IP || 'localhost';
+        const endpointUrl = `http://${vpsIp}:${hostPort}`;
 
         try {
             const info = await container.inspect();

@@ -390,6 +390,7 @@ async function startOpenClawAgent(agentId: string, config: any) {
 
         // Setup environment variables
         const env = [
+            `HOME=/home/node`, // Force HOME so OpenClaw finds config at /home/node/.openclaw/openclaw.json
             `OPENCLAW_AGENT_ID=${agentId}`,
             `OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw`,
             `OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json`

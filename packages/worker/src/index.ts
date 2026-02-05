@@ -327,8 +327,9 @@ async function startOpenClawAgent(agentId: string, config: any) {
         const hash = agentId.split('-').reduce((acc, part) => acc + parseInt(part, 16), 0);
         const hostPort = 19000 + (hash % 1000);
 
-        // Use VPS_PUBLIC_IP if set, otherwise fallback to localhost for standalone/dev
-        const vpsIp = process.env.VPS_PUBLIC_IP || 'localhost';
+        // Use VPS_PUBLIC_IP if set, otherwise fallback to 127.0.0.1 (IPv4) for standalone/dev
+        // We avoid 'localhost' because node/bun often resolve it to ::1 (IPv6) which Docker may not bind to
+        const vpsIp = process.env.VPS_PUBLIC_IP || '127.0.0.1';
         const endpointUrl = `http://${vpsIp}:${hostPort}`;
 
         try {
@@ -374,15 +375,12 @@ async function startOpenClawAgent(agentId: string, config: any) {
         // Write config to .openclaw subdirectory
         const configPath = path.join(openclawDir, 'openclaw.json');
 
-        // Ensure OpenAI bridge is enabled for the message bus to work
+        // Ensure gateway mode is set to local to bypass onboarding
         const finalConfig = {
             ...config,
             gateway: {
-                ...config.gateway,
-                openai: {
-                    enabled: true,
-                    ...(config.gateway?.openai || {})
-                }
+                ...(config.gateway || {}),
+                mode: 'local'
             }
         };
 
@@ -392,13 +390,13 @@ async function startOpenClawAgent(agentId: string, config: any) {
         // Setup environment variables
         const env = [
             `OPENCLAW_AGENT_ID=${agentId}`,
-            `OPENCLAW_WORKSPACE_DIR=/root/.openclaw`,
-            `OPENCLAW_CONFIG_PATH=/root/.openclaw/openclaw.json`
+            `OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw`,
+            `OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json`
         ];
 
         // Ensure gateway token is set for worker-agent communication if provided in config
-        if (config.gateway?.auth?.token) {
-            env.push(`OPENCLAW_GATEWAY_TOKEN=${config.gateway.auth.token}`);
+        if (finalConfig.gateway?.auth?.token) {
+            env.push(`OPENCLAW_GATEWAY_TOKEN=${finalConfig.gateway.auth.token}`);
         }
 
         logger.debug(`Creating container ${containerName} with image openclaw:local (Port ${hostPort})...`);
@@ -418,7 +416,7 @@ async function startOpenClawAgent(agentId: string, config: any) {
             },
             HostConfig: {
                 Binds: [
-                    `${openclawDir}:/root/.openclaw`
+                    `${openclawDir}:/home/node/.openclaw`
                 ],
                 PortBindings: {
                     '18789/tcp': [{ HostPort: hostPort.toString() }]
@@ -529,31 +527,32 @@ async function handleUserMessage(payload: any) {
                 .single();
 
             const config = (desired?.config as any) || {};
+
+
             const token = config.gateway?.auth?.token;
 
-            // Use internal container hostname within blueprints-network
-            const agentUrl = `http://openclaw-${agent_id}:18789`;
+            // Use the endpoint URL from the database (which handles localhost/VPS correctly)
+            const agentUrl = actual.endpoint_url || `http://openclaw-${agent_id}:18789`;
             logger.info(`Message Bus: Calling agent at ${agentUrl}`);
 
-            const res = await fetch(`${agentUrl}/v1/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'x-openclaw-agent-id': 'main' // OpenClaw routing header
-                },
-                body: JSON.stringify({
+            try {
+                const res = await axios.post(`${agentUrl}/v1/chat/completions`, {
                     model: 'openclaw',
                     messages: [{ role: 'user', content }]
-                })
-            });
+                }, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                        'x-openclaw-agent-id': 'main',
+                        'Connection': 'close' // Force close to avoid socket hangup/reuse issues in Bun
+                    }
+                });
 
-            if (res.ok) {
-                const result = await res.json() as any;
+                const result = res.data;
                 agentResponseContent = result.choices?.[0]?.message?.content || agentResponseContent;
-            } else {
-                logger.error(`Message Bus: OpenClaw agent error (${res.status})`);
-                agentResponseContent = `Error: Agent returned status ${res.status}`;
+            } catch (err: any) {
+                logger.error(`Message Bus: OpenClaw agent error (${err.status || err.message})`);
+                agentResponseContent = `Error: Agent returned status ${err.status || err.message}`;
             }
         } else {
             // Placeholder for other frameworks (Eliza, etc.)

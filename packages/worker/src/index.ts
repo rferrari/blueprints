@@ -372,8 +372,21 @@ async function startOpenClawAgent(agentId: string, config: any) {
 
         // Write config to file in workspace
         const configPath = path.join(workspacePath, 'openclaw.json');
+
+        // Ensure OpenAI bridge is enabled for the message bus to work
+        const finalConfig = {
+            ...config,
+            gateway: {
+                ...config.gateway,
+                openai: {
+                    enabled: true,
+                    ...(config.gateway?.openai || {})
+                }
+            }
+        };
+
         logger.info(`Writing OpenClaw config to ${configPath}...`);
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        fs.writeFileSync(configPath, JSON.stringify(finalConfig, null, 2));
 
         // Setup environment variables
         const env = [
@@ -525,7 +538,8 @@ async function handleUserMessage(payload: any) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Bearer ${token}`,
+                    'x-openclaw-agent-id': 'main' // OpenClaw routing header
                 },
                 body: JSON.stringify({
                     model: 'openclaw',

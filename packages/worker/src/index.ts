@@ -231,6 +231,9 @@ async function startElizaAgent(agentId: string, config: any) {
         failureCounts.delete(agentId); // Success! Reset counter
         logger.info(`Eliza agent ${agentId} started successfully on runtime ${runtime.id}`);
     } catch (err: any) {
+        if (err.isAxiosError && err.response) {
+            logger.error(`Runtime API Error (${err.response.status}):`, JSON.stringify(err.response.data, null, 2));
+        }
         logger.error(`Failed to start Eliza agent ${agentId}:`, err.message);
 
         const currentFailures = (failureCounts.get(agentId) || 0) + 1;
@@ -396,6 +399,9 @@ async function startOpenClawAgent(agentId: string, config: any) {
         failureCounts.delete(agentId); // Success! Reset counter
         logger.info(`OpenClaw agent ${agentId} started via Docker successfully.`);
     } catch (err: any) {
+        if (err.isAxiosError && err.response) {
+            logger.error(`Docker API Error (${err.response.status}):`, JSON.stringify(err.response.data, null, 2));
+        }
         logger.error(`Failed to start OpenClaw agent ${agentId}:`, err.message);
 
         const currentFailures = (failureCounts.get(agentId) || 0) + 1;

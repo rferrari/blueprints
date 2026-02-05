@@ -366,10 +366,23 @@ async function startOpenClawAgent(agentId: string, config: any) {
         }
 
         // Setup workspace directory with .openclaw subdirectory
+        // Setup workspace directory with .openclaw subdirectory
+        // This path is internal to the worker container/process
         const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
         const openclawDir = path.join(workspacePath, '.openclaw');
         if (!fs.existsSync(openclawDir)) {
             fs.mkdirSync(openclawDir, { recursive: true });
+        }
+
+        // Determine the path to be used for the Docker bind mount (what the Docker Daemon sees on the HOST)
+        // If HOST_WORKSPACES_PATH is set (e.g. /root/project/workspaces), use that.
+        // Otherwise, fall back to the resolved path (which works if worker is not in docker, or paths align).
+        const hostWorkspacesPath = process.env.HOST_WORKSPACES_PATH;
+        let hostOpenclawDir = openclawDir;
+
+        if (hostWorkspacesPath) {
+            hostOpenclawDir = path.join(hostWorkspacesPath, agentId, '.openclaw');
+            logger.debug(`Using HOST_WORKSPACES_PATH: Mapping ${hostOpenclawDir} -> /home/node/.openclaw`);
         }
 
         // Write config to .openclaw subdirectory
@@ -416,7 +429,7 @@ async function startOpenClawAgent(agentId: string, config: any) {
             },
             HostConfig: {
                 Binds: [
-                    `${openclawDir}:/home/node/.openclaw`
+                    `${hostOpenclawDir}:/home/node/.openclaw`
                 ],
                 PortBindings: {
                     '18789/tcp': [{ HostPort: hostPort.toString() }]

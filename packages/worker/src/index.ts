@@ -341,8 +341,6 @@ async function startOpenClawAgent(agentId: string, config: any) {
                 const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
                 if (!fs.existsSync(workspacePath)) {
                     fs.mkdirSync(workspacePath, { recursive: true });
-                    // Ensure the container user (node) can write to it
-                    try { fs.chmodSync(workspacePath, 0o777); } catch (e) { }
                 }
                 const configPath = path.join(workspacePath, 'openclaw.json');
                 if (!fs.existsSync(configPath)) {
@@ -370,8 +368,6 @@ async function startOpenClawAgent(agentId: string, config: any) {
         const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
         if (!fs.existsSync(workspacePath)) {
             fs.mkdirSync(workspacePath, { recursive: true });
-            // Ensure the container user (node) can write to it
-            try { fs.chmodSync(workspacePath, 0o777); } catch (e) { }
         }
 
         // Write config to file in workspace
@@ -392,8 +388,14 @@ async function startOpenClawAgent(agentId: string, config: any) {
         }
 
         logger.debug(`Creating container ${containerName} with image openclaw:local (Port ${hostPort})...`);
+
+        // Securely run as the same user as the worker to avoid permission issues without 777
+        const uid = process.getuid ? process.getuid() : 1000;
+        const gid = process.getgid ? process.getgid() : 1000;
+
         const newContainer = await docker.createContainer({
             Image: 'openclaw:local',
+            User: `${uid}:${gid}`,
             name: containerName,
             Env: env,
             Cmd: ['node', 'dist/index.js', 'gateway', '--allow-unconfigured', '--bind', 'lan'],

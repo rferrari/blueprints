@@ -506,6 +506,10 @@ async function stopOpenClawAgent(agentId: string) {
 
 // --- Message Bus Implementation ---
 
+
+
+const isDocker = fs.existsSync('/.dockerenv');
+
 async function handleUserMessage(payload: any) {
     const { id, agent_id, content, user_id } = payload;
     logger.info(`Message Bus: Received user message for agent ${agent_id}`);
@@ -544,8 +548,16 @@ async function handleUserMessage(payload: any) {
 
             const token = config.gateway?.auth?.token;
 
-            // Use the endpoint URL from the database (which handles localhost/VPS correctly)
-            const agentUrl = actual.endpoint_url || `http://openclaw-${agent_id}:18789`;
+            // Determine correct Agent URL
+            // If running in Docker (VPS/Production), we MUST use the internal container hostname (blueprints-network).
+            // If running locally (Host), we use the endpoint_url (localhost:port) from the DB.
+            let agentUrl = actual.endpoint_url || `http://openclaw-${agent_id}:18789`;
+
+            if (isDocker) {
+                agentUrl = `http://openclaw-${agent_id}:18789`;
+                logger.debug(`Message Bus: Running in Docker, switching to internal URL: ${agentUrl}`);
+            }
+
             logger.info(`Message Bus: Calling agent at ${agentUrl}`);
 
             try {

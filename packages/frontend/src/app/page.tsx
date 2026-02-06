@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { createClient } from '@/lib/supabase';
 import {
     Bot,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import AuthErrorToast from '@/components/auth-error-toast';
 
 export default function LandingPage() {
     const [user, setUser] = useState<any>(null);
@@ -55,6 +56,11 @@ export default function LandingPage() {
             {/* Background Decorations */}
             <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[120px] -translate-y-1/2 animate-pulse" />
             <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-500/10 rounded-full blur-[120px] translate-y-1/2 animate-pulse delay-1000" />
+
+            {/* Error Notifications */}
+            <Suspense>
+                <AuthErrorToast />
+            </Suspense>
 
             {/* Navigation */}
             <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-background/50 backdrop-blur-xl">

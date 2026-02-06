@@ -265,13 +265,19 @@ export default function DashboardPage() {
                                 Cluster: {isBackendOnline ? 'Online' : 'Offline'}
                             </span>
                         </div>
-                        <div className="size-10 rounded-full border-2 border-primary/30 p-0.5 shadow-lg shadow-primary/10">
+                        <button
+                            onClick={() => {
+                                setView('settings');
+                                setSelectedProject(null);
+                            }}
+                            className="size-10 rounded-full border-2 border-primary/30 p-0.5 shadow-lg shadow-primary/10 hover:scale-105 active:scale-95 transition-transform"
+                        >
                             <img
                                 src={`https://avatar.vercel.sh/${user?.email}`}
                                 className="w-full h-full rounded-full object-cover"
                                 alt="User"
                             />
-                        </div>
+                        </button>
                     </div>
                 </header>
 

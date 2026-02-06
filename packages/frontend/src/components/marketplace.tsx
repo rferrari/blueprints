@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Filter, Download, Check, Loader2, Bot, Zap, Star, Shield, Sparkles } from 'lucide-react';
+import { Search, Filter, Download, Check, Loader2, Bot, Zap, Star, Shield, Sparkles, Cpu, Box, Layers } from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
 
 interface AgentTemplate {
@@ -9,6 +9,7 @@ interface AgentTemplate {
     name: string;
     description: string;
     category: string;
+    framework: 'elizaos' | 'openclaw';
     icon: string;
     config: any;
     stats?: {
@@ -18,11 +19,13 @@ interface AgentTemplate {
 }
 
 const templates: AgentTemplate[] = [
+    // ElizaOS Agents
     {
         id: 'social-manager',
         name: 'Social Media Manager',
         description: 'Automates viral content creation, engagement, and cross-platform scheduling.',
         category: 'Marketing',
+        framework: 'elizaos',
         icon: 'share',
         stats: { installs: '15k', rating: '4.9' },
         config: {
@@ -37,6 +40,7 @@ const templates: AgentTemplate[] = [
         name: 'Financial Analyst',
         description: 'Real-time market insights, portfolio tracking, and risk assessment.',
         category: 'Finance',
+        framework: 'elizaos',
         icon: 'trending-up',
         stats: { installs: '9k', rating: '4.8' },
         config: {
@@ -51,6 +55,7 @@ const templates: AgentTemplate[] = [
         name: 'Omni Support Agent',
         description: '24/7 intelligent customer support with RAG capabilities.',
         category: 'Support',
+        framework: 'elizaos',
         icon: 'life-buoy',
         stats: { installs: '12k', rating: '5.0' },
         config: {
@@ -59,12 +64,46 @@ const templates: AgentTemplate[] = [
             modelProvider: "google",
             plugins: ["@elizaos/plugin-bootstrap", "@elizaos/plugin-sql"]
         }
+    },
+
+    // OpenClaw Agents
+    {
+        id: 'neural-executive',
+        name: 'Neural Executive',
+        description: 'Autonomous personal assistant capable of long-horizon planning and task execution.',
+        category: 'Personal Assistance',
+        framework: 'openclaw',
+        icon: 'user-check',
+        stats: { installs: '2k', rating: '5.0' },
+        config: {
+            bio: ["Highly organized executive assistant", "Capable of complex reasoning and tool use"],
+            lore: ["Optimized for efficiency", "Can manage calendars, emails, and complex workflows"],
+            modelProvider: "anthropic",
+            plugins: ["openclaw-core", "openclaw-planner"]
+        }
+    },
+    {
+        id: 'research-sentinel',
+        name: 'Deep Research Unit',
+        description: 'Advanced web crawler and data synthesizer for deep-dive investigations.',
+        category: 'Intelligence',
+        framework: 'openclaw',
+        icon: 'search',
+        stats: { installs: '5k', rating: '4.9' },
+        config: {
+            bio: ["A relentless researcher", "Synthesizes vast amounts of information"],
+            lore: ["Can read and summarize entire documentation sites", "Expert in fact-checking"],
+            modelProvider: "openai",
+            plugins: ["openclaw-browser", "openclaw-memory"]
+        }
     }
 ];
 
 export default function Marketplace({ projectId }: { projectId: string }) {
     const { session } = useAuth();
     const [search, setSearch] = useState('');
+    const [frameworkFilter, setFrameworkFilter] = useState<'all' | 'elizaos' | 'openclaw'>('all');
+    const [categoryFilter, setCategoryFilter] = useState('All');
     const [installing, setInstalling] = useState<string | null>(null);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -114,7 +153,8 @@ export default function Marketplace({ projectId }: { projectId: string }) {
                 body: JSON.stringify({
                     name: agentName,
                     templateId: selectedTemplate.id,
-                    configTemplate: finalConfig
+                    configTemplate: finalConfig,
+                    framework: selectedTemplate.framework
                 })
             });
 
@@ -133,10 +173,18 @@ export default function Marketplace({ projectId }: { projectId: string }) {
         }
     };
 
-    const filteredTemplates = templates.filter(t =>
-        t.name.toLowerCase().includes(search.toLowerCase()) ||
-        t.category.toLowerCase().includes(search.toLowerCase())
-    );
+    const filteredTemplates = templates.filter(t => {
+        const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase()) ||
+            t.category.toLowerCase().includes(search.toLowerCase());
+        const matchesFramework = frameworkFilter === 'all' || t.framework === frameworkFilter;
+        const matchesCategory = categoryFilter === 'All' || t.category === categoryFilter;
+        return matchesSearch && matchesFramework && matchesCategory;
+    });
+
+    // Helper to get all categories based on current filtered set (or all)
+    // Actually simplicity: Just static list + dynamic?
+    // Let's stick to a curated list for the filter bar
+    const categories = ['All', 'Marketing', 'Finance', 'Support', 'Personal Assistance', 'Intelligence'];
 
     if (selectedTemplate && setupStep >= 2) {
         return (
@@ -193,7 +241,7 @@ export default function Marketplace({ projectId }: { projectId: string }) {
 
                             <div className="p-8 rounded-[2rem] bg-indigo-500/5 border border-indigo-500/10">
                                 <h4 className="flex items-center gap-2 text-sm font-black uppercase tracking-widest mb-4">
-                                    <Shield size={16} className="text-indigo-400" /> Pre-installed Skills
+                                    <Shield size={16} className="text-indigo-400" /> {selectedTemplate.framework === 'elizaos' ? 'Pre-installed Skills' : 'Core Capabilities'}
                                 </h4>
                                 <div className="flex flex-wrap gap-2">
                                     {selectedTemplate.config.plugins.map((p: string) => (
@@ -234,7 +282,29 @@ export default function Marketplace({ projectId }: { projectId: string }) {
                         <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-[10px] font-black uppercase tracking-widest">Available Functions</span>
                     </div>
                     <h2 className="text-4xl font-black tracking-tight mb-4">Functional <span className="text-transparent bg-clip-text bg-gradient-unicorn">Blueprints</span></h2>
-                    <p className="text-muted-foreground font-medium text-lg mb-8">Choose a specialized blueprint to jumpstart your agent's deployment. Each comes pre-loaded with industry-specific plugins.</p>
+                    <p className="text-muted-foreground font-medium text-lg mb-8">Choose a specialized blueprint to jumpstart your agent's deployment. Each comes pre-loaded with industry-specific capabilities.</p>
+                </div>
+            </div>
+
+            {/* Framework Toggle */}
+            <div className="flex justify-center">
+                <div className="p-1 rounded-2xl bg-white/5 border border-white/5 flex gap-1">
+                    {[
+                        { id: 'all', label: 'All Frameworks' },
+                        { id: 'elizaos', label: 'ElizaOS' },
+                        { id: 'openclaw', label: 'OpenClaw' }
+                    ].map(fw => (
+                        <button
+                            key={fw.id}
+                            onClick={() => setFrameworkFilter(fw.id as any)}
+                            className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${frameworkFilter === fw.id
+                                    ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                                    : 'text-muted-foreground hover:text-white hover:bg-white/5'
+                                }`}
+                        >
+                            {fw.label}
+                        </button>
+                    ))}
                 </div>
             </div>
 
@@ -250,9 +320,13 @@ export default function Marketplace({ projectId }: { projectId: string }) {
                         className="w-full bg-white/5 border border-white/5 rounded-2xl py-3.5 pl-12 pr-4 outline-none focus:border-primary/50 focus:bg-white/[0.08] transition-all font-medium text-sm"
                     />
                 </div>
-                <div className="flex gap-2 p-1 bg-white/5 rounded-2xl border border-white/5">
-                    {['All', 'Marketing', 'Finance', 'Support'].map(cat => (
-                        <button key={cat} className={`px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${cat === 'All' ? 'bg-white text-black' : 'text-muted-foreground hover:bg-white/5 hover:text-white'}`}>
+                <div className="flex flex-wrap justify-center gap-2 p-1 bg-white/5 rounded-2xl border border-white/5">
+                    {categories.map(cat => (
+                        <button
+                            key={cat}
+                            onClick={() => setCategoryFilter(cat)}
+                            className={`px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${categoryFilter === cat ? 'bg-white text-black' : 'text-muted-foreground hover:bg-white/5 hover:text-white'}`}
+                        >
                             {cat}
                         </button>
                     ))}
@@ -272,14 +346,20 @@ export default function Marketplace({ projectId }: { projectId: string }) {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {filteredTemplates.map(template => (
                     <div key={template.id} className="glass-card rounded-[2.5rem] p-8 flex flex-col group active:scale-[0.99] transition-all duration-300">
-                        <div className="flex justify-between items-start mb-10">
-                            <div className="size-16 rounded-[1.5rem] bg-gradient-unicorn p-0.5 shadow-xl shadow-primary/10 transition-transform group-hover:scale-110 duration-500">
-                                <div className="w-full h-full bg-background rounded-[calc(1.5rem-2px)] flex items-center justify-center">
-                                    <Bot size={32} />
+                        <div className="flex justify-between items-start mb-8">
+                            <div className={`size-16 rounded-[1.5rem] p-0.5 shadow-xl transition-transform group-hover:scale-110 duration-500 ${template.framework === 'elizaos' ? 'bg-gradient-unicorn shadow-primary/10' : 'bg-gradient-to-br from-blue-500 to-indigo-600 shadow-blue-500/20'
+                                }`}>
+                                <div className="w-full h-full bg-background rounded-[calc(1.5rem-2px)] flex items-center justify-center text-white">
+                                    {template.framework === 'elizaos' ? <Bot size={32} /> : <Cpu size={32} />}
                                 </div>
                             </div>
-                            <div className="flex flex-col items-end gap-1">
-                                <span className="text-[10px] font-black uppercase tracking-widest text-primary">{template.category}</span>
+                            <div className="flex flex-col items-end gap-2">
+                                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">{template.category}</span>
+                                <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 ${template.framework === 'elizaos' ? 'text-amber-400' : 'text-blue-400'
+                                    }`}>
+                                    {template.framework === 'elizaos' ? <Box size={10} /> : <Layers size={10} />}
+                                    {template.framework === 'elizaos' ? 'ElizaOS' : 'OpenClaw'}
+                                </span>
                             </div>
                         </div>
 
@@ -287,10 +367,17 @@ export default function Marketplace({ projectId }: { projectId: string }) {
                         <p className="text-muted-foreground text-sm font-medium leading-relaxed mb-10 flex-1">{template.description}</p>
 
                         <div className="flex items-center justify-between pt-6 border-t border-white/5 mt-auto">
-                            <div className="flex flex-col">
-                                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50">Plugins Included</span>
-                                <span className="text-lg font-black text-white tracking-tight">{template.config.plugins.length}</span>
-                            </div>
+                            {template.framework === 'elizaos' ? (
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50">Plugins</span>
+                                    <span className="text-lg font-black text-white tracking-tight">{template.config.plugins.length}</span>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50">Core</span>
+                                    <span className="text-lg font-black text-white tracking-tight">V2</span>
+                                </div>
+                            )}
                             <button
                                 onClick={() => startSetup(template)}
                                 className={`flex items-center gap-2 px-6 py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all relative overflow-hidden group/btn bg-primary text-white shadow-lg shadow-primary/30 active:scale-95`}

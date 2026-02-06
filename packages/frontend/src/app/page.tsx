@@ -12,7 +12,8 @@ import {
     Globe,
     MessageSquare,
     ChevronRight,
-    Star
+    Star,
+    Check
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -70,7 +71,7 @@ export default function LandingPage() {
                     <div className="flex items-center gap-8">
                         <div className="hidden md:flex items-center gap-6 text-sm font-bold text-muted-foreground uppercase tracking-widest">
                             <a href="#features" className="hover:text-white transition-colors">Infrastructure</a>
-                            <a href="#pricing" className="hover:text-white transition-colors">Resources</a>
+                            <a href="#plans" className="hover:text-white transition-colors">Plans</a>
                         </div>
                         {loading ? (
                             <div className="size-8 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
@@ -210,6 +211,105 @@ export default function LandingPage() {
                 </div>
             </section>
 
+            {/* Plans Section */}
+            <section id="plans" className="py-32 px-6 border-t border-white/5 bg-white/[0.02]">
+                <div className="max-w-7xl mx-auto">
+                    <div className="text-center mb-24">
+                        <h2 className="text-4xl font-black tracking-tighter mb-4">Scalable Plans</h2>
+                        <p className="text-muted-foreground font-medium">Choose the perfect tier for your operations.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        {/* Free Tier */}
+                        <div className="glass-card rounded-[2.5rem] p-8 md:p-12 border-white/5 flex flex-col relative overflow-hidden group hover:border-white/10 transition-colors">
+                            <h3 className="text-xl font-bold mb-2">Starter</h3>
+                            <div className="flex items-baseline gap-1 mb-6">
+                                <span className="text-4xl font-black tracking-tighter">$0</span>
+                                <span className="text-muted-foreground font-medium text-sm">/month</span>
+                            </div>
+                            <p className="text-muted-foreground text-sm font-medium leading-relaxed mb-8">Perfect for experimenting with autonomous agents.</p>
+
+                            <ul className="space-y-4 mb-10 flex-1">
+                                <li className="flex items-center gap-3 text-sm font-bold text-muted-foreground">
+                                    <Check size={16} className="text-white" /> 1 Active Agent
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-muted-foreground">
+                                    <Check size={16} className="text-white" /> Community Support
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-muted-foreground">
+                                    <Check size={16} className="text-white" /> Basic Plugins
+                                </li>
+                            </ul>
+
+                            <Link href="/signup" className="w-full py-4 text-center rounded-2xl bg-white/5 hover:bg-white/10 text-white font-black text-xs uppercase tracking-widest transition-all">
+                                Get Started
+                            </Link>
+                        </div>
+
+                        {/* Pro Tier */}
+                        <div className="glass-card rounded-[2.5rem] p-8 md:p-12 border-primary/20 bg-primary/5 flex flex-col relative overflow-hidden group hover:border-primary/40 transition-colors">
+                            <div className="absolute top-0 right-0 px-6 py-2 bg-gradient-unicorn text-[10px] font-black uppercase tracking-widest text-white rounded-bl-2xl">
+                                Most Popular
+                            </div>
+                            <h3 className="text-xl font-bold mb-2 text-white">Pro</h3>
+                            <div className="flex items-baseline gap-1 mb-6">
+                                <span className="text-4xl font-black tracking-tighter">$29</span>
+                                <span className="text-muted-foreground font-medium text-sm">/month</span>
+                            </div>
+                            <p className="text-muted-foreground text-sm font-medium leading-relaxed mb-8">For power users building complex swarms.</p>
+
+                            <ul className="space-y-4 mb-10 flex-1">
+                                <li className="flex items-center gap-3 text-sm font-bold text-white">
+                                    <Check size={16} className="text-primary" /> 10 Active Agents
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-white">
+                                    <Check size={16} className="text-primary" /> Priority Support
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-white">
+                                    <Check size={16} className="text-primary" /> All Pro Plugins
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-white">
+                                    <Check size={16} className="text-primary" /> Early Access Features
+                                </li>
+                            </ul>
+
+                            <button className="w-full py-4 relative group overflow-hidden rounded-2xl bg-primary text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-primary/20">
+                                <div className="absolute inset-0 bg-gradient-unicorn opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                                <span className="relative">Upgrade Now</span>
+                            </button>
+                        </div>
+
+                        {/* Enterprise Tier */}
+                        <div className="glass-card rounded-[2.5rem] p-8 md:p-12 border-white/5 flex flex-col relative overflow-hidden group hover:border-white/10 transition-colors">
+                            <h3 className="text-xl font-bold mb-2">Enterprise</h3>
+                            <div className="flex items-baseline gap-1 mb-6">
+                                <span className="text-4xl font-black tracking-tighter">Custom</span>
+                            </div>
+                            <p className="text-muted-foreground text-sm font-medium leading-relaxed mb-8">Dedicated infrastructure for global scale.</p>
+
+                            <ul className="space-y-4 mb-10 flex-1">
+                                <li className="flex items-center gap-3 text-sm font-bold text-muted-foreground">
+                                    <Check size={16} className="text-white" /> Unlimited Agents
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-muted-foreground">
+                                    <Check size={16} className="text-white" /> Private Cloud VPC
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-muted-foreground">
+                                    <Check size={16} className="text-white" /> 24/7 Dedicated Support
+                                </li>
+                                <li className="flex items-center gap-3 text-sm font-bold text-muted-foreground">
+                                    <Check size={16} className="text-white" /> Custom SLAs
+                                </li>
+                            </ul>
+
+                            <a href="mailto:sales@blankspace.ai" className="w-full py-4 text-center rounded-2xl bg-white/5 hover:bg-white/10 text-white font-black text-xs uppercase tracking-widest transition-all">
+                                Contact Sales
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             {/* CTA Section */}
             <section className="py-48 px-6">
                 <div className="max-w-4xl mx-auto relative">
@@ -226,13 +326,22 @@ export default function LandingPage() {
                             Join the growing ecosystem of autonomous agent managers and scale your AI workflows today.
                         </p>
 
-                        <Link
-                            href={user ? "/dashboard" : "/signup"}
-                            className="inline-flex items-center gap-3 px-12 py-6 bg-primary text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-primary/90 transition-all active:scale-95 shadow-2xl shadow-primary/20 relative z-10 group"
-                        >
-                            {user ? 'Enter Dashboard' : 'Initialize Your Cluster'}
-                            <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
-                        </Link>
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 relative z-10">
+                            <Link
+                                href={user ? "/dashboard" : "/signup"}
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-12 py-6 bg-primary text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-primary/90 transition-all active:scale-95 shadow-2xl shadow-primary/20 group"
+                            >
+                                {user ? 'Enter Dashboard' : 'Initialize Your Cluster'}
+                                <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                            </Link>
+                            <Link
+                                href="/contact"
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-12 py-6 glass border border-white/10 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-white/5 transition-all active:scale-95 group"
+                            >
+                                <MessageSquare size={18} />
+                                Talk with our Agent
+                            </Link>
+                        </div>
                     </div>
                 </div>
             </section>

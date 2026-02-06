@@ -13,7 +13,8 @@ import {
     MessageSquare,
     ChevronRight,
     Star,
-    Check
+    Check,
+    RefreshCw
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -190,9 +191,9 @@ export default function LandingPage() {
                             delay={200}
                         />
                         <FeatureCard
-                            icon={Cpu}
-                            title="Neural Telemetry"
-                            description="Real-time monitoring of inference latency, token usage, and resource consumption."
+                            icon={RefreshCw}
+                            title="Zero-Downtime Clusters"
+                            description="Hot-reload capabilities allow adding, removing, or updating agents instantly without restarting containers."
                             delay={300}
                         />
                         <FeatureCard

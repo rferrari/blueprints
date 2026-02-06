@@ -49,6 +49,33 @@ export default function InfrastructurePage() {
                             <p className="text-4xl font-black text-white">99.99%</p>
                         </div>
                     </div>
+
+                    {/* Eliza Cluster Engine Highlights */}
+                    <div className="p-8 rounded-3xl border border-purple-500/20 bg-purple-500/5 mt-6">
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="size-10 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400">
+                                <Server size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-lg text-white">Eliza Cluster Engine</h3>
+                                <p className="text-xs font-medium text-purple-400 uppercase tracking-widest">Live • Version 2.0</p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <h4 className="font-bold text-white mb-2">Zero-Downtime Management</h4>
+                                <p className="text-sm text-muted-foreground leading-relaxed">
+                                    Agents can be added, removed, or updated via CLI without restarting the cluster container.
+                                </p>
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-white mb-2">Hot-Reload Capabilities</h4>
+                                <p className="text-sm text-muted-foreground leading-relaxed">
+                                    Dynamic configuration injection allows for instant character updates in milliseconds.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -464,7 +464,7 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
                             const hours = Math.floor(diff / 3600000);
                             const mins = Math.floor((diff % 3600000) / 60000);
                             const secs = Math.floor((diff % 60000) / 1000);
-                            purgeStatus = { label: 'PURGING IN', time: `${hours}h ${mins}m`, color: 'text-destructive bg-destructive/10 border-destructive/20 animate-pulse font-black shadow-[0_0_15px_rgba(239,68,68,0.2)]' };
+                            purgeStatus = { label: 'TERMINATING IN', time: `${hours}h ${mins}m`, color: 'text-destructive bg-destructive/10 border-destructive/20 animate-pulse font-black shadow-[0_0_15px_rgba(239,68,68,0.2)]' };
                         }
                     }
 
@@ -472,7 +472,7 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
                         <div key={agent.id} className={`glass-card rounded-[2.5rem] p-6 pr-10 hover:bg-white/[0.04] transition-all duration-500 group relative overflow-hidden ${desired.purge_at ? 'border-amber-500/30 bg-amber-500/5 shadow-[0_0_50px_rgba(245,158,11,0.1)]' : ''}`}>
                             {desired.purge_at && (
                                 <div className="absolute top-0 right-0 px-8 py-2 bg-amber-500 text-black text-[10px] font-black uppercase tracking-widest origin-bottom-right rotate-45 translate-x-[20%] translate-y-[50%] shadow-xl">
-                                    DANGER ZONE
+                                    TERMINATION SEQ
                                 </div>
                             )}
                             <div className="flex flex-col md:flex-row justify-between items-center gap-6">
@@ -596,9 +596,9 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
                         setPurgeModal({ isOpen: false, agentId: null });
                     }
                 }}
-                title="Execute Final Purge?"
+                title="Execute Final Termination?"
                 message="This action will bypass the 24-hour safety window and permanently destroy this agent. This cannot be undone."
-                confirmText="Purge Now"
+                confirmText="Terminate Now"
                 type="danger"
             />
         </div>

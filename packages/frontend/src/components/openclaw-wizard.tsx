@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal } from 'lucide-react';
+import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck } from 'lucide-react';
 
 interface OpenClawWizardProps {
     agent: any;
@@ -16,11 +16,23 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
     // Initial State derived from existing config or defaults
     const [config, setConfig] = useState({
-        provider: existingConfig.auth?.profiles?.['default']?.provider || 'anthropic',
-        mode: existingConfig.auth?.profiles?.['default']?.mode || 'api_key',
+        provider: existingConfig.auth?.profiles?.['default']?.provider || 'venice', // Default to Venice
+        mode: 'api_key', // Enforce API Key
         token: existingConfig.auth?.profiles?.['default']?.token || '',
         gatewayToken: existingConfig.gateway?.auth?.token || Math.random().toString(36).substring(2, 15),
-        telegramToken: existingConfig.channels?.telegram?.token || '',
+
+        // Channels
+        channels: {
+            telegram: !!existingConfig.channels?.telegram?.enabled,
+            discord: !!existingConfig.channels?.discord?.enabled,
+            whatsapp: !!existingConfig.channels?.whatsapp?.enabled,
+            slack: !!existingConfig.channels?.slack?.enabled,
+        },
+        telegramToken: existingConfig.channels?.telegram?.botToken || '',
+        discordToken: existingConfig.channels?.discord?.token || '',
+        whatsappToken: existingConfig.channels?.whatsapp?.token || '',
+        slackToken: existingConfig.channels?.slack?.token || '',
+
         ...existingConfig
     });
 
@@ -28,34 +40,59 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         { id: 1, title: 'Intelligence Provider', icon: <Zap size={20} /> },
         { id: 2, title: 'Neural Credentials', icon: <Key size={20} /> },
         { id: 3, title: 'Gateway Security', icon: <Shield size={20} /> },
-        { id: 4, title: 'Neural Channels', icon: <MessageSquare size={20} /> },
+        { id: 4, title: 'Communication Channels', icon: <Share2 size={20} /> },
+        { id: 5, title: 'Channel Configuration', icon: <MessageSquare size={20} /> },
     ];
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            // Transform back to OpenClaw specific schema
+            // Channel Configuration
+            const channelsConfig: any = {};
+            if (config.channels.telegram && config.telegramToken) channelsConfig.telegram = { enabled: true, botToken: config.telegramToken };
+            if (config.channels.discord && config.discordToken) channelsConfig.discord = { enabled: true, token: config.discordToken };
+            if (config.channels.slack && config.slackToken) channelsConfig.slack = { enabled: true, token: config.slackToken };
+            if (config.channels.whatsapp && config.whatsappToken) channelsConfig.whatsapp = { enabled: true, token: config.whatsappToken };
+
+            // Model Configuration
+            let modelId = 'gpt-4o';
+            let modelName = 'GPT-4o';
+            let modelApi = 'openai-responses';
+            let baseUrl = 'https://api.openai.com/v1';
+
+            if (config.provider === 'anthropic') {
+                modelId = 'claude-3-5-sonnet-latest';
+                modelName = 'Claude 3.5 Sonnet';
+                modelApi = 'anthropic-messages';
+                baseUrl = 'https://api.anthropic.com';
+            } else if (config.provider === 'venice') {
+                modelId = 'venice/llama-3.3-70b';
+                modelName = 'Llama 3.3 70B (Venice)';
+                modelApi = 'openai-responses'; // Venice is OpenAI compatible
+                baseUrl = 'https://api.venice.ai/api/v1';
+            } else if (config.provider === 'blueprint_shared') {
+                modelId = 'blueprint/shared-model';
+                modelName = 'Blueprint Managed Intelligence';
+                modelApi = 'openai-responses';
+                baseUrl = 'https://api.blueprint.network/v1'; // Fictional internal endpoint
+            }
+
             const finalConfig = {
                 auth: {
                     profiles: {
                         'default': {
                             provider: config.provider,
-                            mode: config.mode
-                        },
-                        ...(config.provider === 'anthropic' && config.mode === 'token' ? {
-                            'claude': { provider: 'anthropic', mode: 'token' }
-                        } : {})
+                            mode: 'api_key'
+                        }
                     }
                 },
                 models: {
                     providers: {
                         [config.provider]: {
                             apiKey: config.token,
-                            baseUrl: config.provider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1',
-                            models: config.provider === 'anthropic' ? [
-                                { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet', api: 'anthropic-messages', compat: {} }
-                            ] : [
-                                { id: 'gpt-4o', name: 'GPT-4o', api: 'openai-responses', compat: {} }
+                            baseUrl,
+                            models: [
+                                { id: modelId, name: modelName, api: modelApi, compat: {} }
                             ]
                         }
                     }
@@ -64,12 +101,10 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                     defaults: {
                         workspace: `/home/node/.openclaw`,
                         model: {
-                            primary: config.provider === 'anthropic' ? 'anthropic/claude-3-5-sonnet-latest' : 'openai/gpt-4o'
+                            primary: `${config.provider}/${modelId}`
                         },
-                        models: config.provider === 'anthropic' ? {
-                            'anthropic/claude-3-5-sonnet-latest': {}
-                        } : {
-                            'openai/gpt-4o': {}
+                        models: {
+                            [`${config.provider}/${modelId}`]: {}
                         }
                     }
                 },
@@ -81,15 +116,11 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                     bind: 'lan',
                     http: {
                         endpoints: {
-                            chatCompletions: {
-                                enabled: true
-                            }
+                            chatCompletions: { enabled: true }
                         }
                     }
                 },
-                channels: {
-                    ...(config.telegramToken ? { telegram: { enabled: true, botToken: config.telegramToken } } : {})
-                }
+                channels: channelsConfig
             };
 
             await onSave(finalConfig);
@@ -137,10 +168,12 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step === 1 && (
                             <div className="space-y-6">
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Choose the primary intelligence source for **{agent.name}**. OpenClaw supports both direct API access and session-based automation.
+                                    Choose the primary intelligence source for **{agent.name}**.
                                 </p>
                                 <div className="grid grid-cols-1 gap-4">
                                     {[
+                                        { id: 'venice', name: 'Venice AI', desc: 'Uncensored, private, and high-performance.', icon: <Cpu className="text-purple-400" /> },
+                                        { id: 'blueprint_shared', name: 'Blueprint Shared', desc: 'Free tier community intelligence (Rate Limited).', icon: <Share2 className="text-blue-400" /> },
                                         { id: 'anthropic', name: 'Anthropic Claude', desc: 'Optimized for reasoning and coding.', icon: <Bot className="text-orange-500" /> },
                                         { id: 'openai', name: 'OpenAI GPT', desc: 'Fast, reliable, and versatile.', icon: <Zap className="text-green-500" /> },
                                     ].map(p => (
@@ -166,40 +199,40 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step === 2 && (
                             <div className="space-y-8">
                                 <div className="space-y-4">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Authentication Mode</label>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <button
-                                            onClick={() => setConfig({ ...config, mode: 'api_key' })}
-                                            className={`py-4 rounded-2xl border font-black text-[10px] uppercase tracking-widest transition-all ${config.mode === 'api_key' ? 'bg-white text-black border-white' : 'border-white/5 text-muted-foreground hover:bg-white/5'}`}
-                                        >
-                                            API KEY
-                                        </button>
-                                        <button
-                                            onClick={() => setConfig({ ...config, mode: 'token' })}
-                                            className={`py-4 rounded-2xl border font-black text-[10px] uppercase tracking-widest transition-all ${config.mode === 'token' ? 'bg-white text-black border-white' : 'border-white/5 text-muted-foreground hover:bg-white/5'}`}
-                                        >
-                                            SESSION TOKEN
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-4">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                                        {config.mode === 'api_key' ? 'Enter API Key' : 'Enter Session Token (sk-ant-sid...)'}
-                                    </label>
-                                    <div className="relative">
-                                        <input
-                                            type="password"
-                                            value={config.token}
-                                            onChange={(e) => setConfig({ ...config, token: e.target.value })}
-                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-mono text-sm focus:border-primary outline-none transition-all"
-                                            placeholder={config.mode === 'api_key' ? 'sk-...' : 'sk-ant-sid01-...'}
-                                        />
-                                        <Key className="absolute right-6 top-1/2 -translate-y-1/2 text-muted-foreground/30" size={20} />
-                                    </div>
-                                    <p className="text-[10px] text-muted-foreground font-medium italic">
-                                        * Secrets are stored securely in your encrypted vault.
-                                    </p>
+                                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Authentication</label>
+                                    {config.provider === 'blueprint_shared' ? (
+                                        <div className="p-6 rounded-2xl border border-blue-500/20 bg-blue-500/5 flex items-start gap-4">
+                                            <div className="p-2 rounded-full bg-blue-500/10 text-blue-400 mt-1">
+                                                <ShieldCheck size={20} />
+                                            </div>
+                                            <div>
+                                                <h4 className="font-bold text-sm text-blue-100 mb-2">Managed Access</h4>
+                                                <p className="text-xs text-blue-200/60 leading-relaxed">
+                                                    You are using the Blueprint Community shared pool. Access is granted via your neural identity signature. No manual API key is required.
+                                                </p>
+                                                <div className="mt-4 flex items-center gap-2 text-[10px] font-mono text-blue-300">
+                                                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Rate Limits Active
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="relative">
+                                                <input
+                                                    type="password"
+                                                    value={config.token}
+                                                    onChange={(e) => setConfig({ ...config, token: e.target.value })}
+                                                    className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-mono text-sm focus:border-primary outline-none transition-all"
+                                                    placeholder={`sk-${config.provider.substring(0, 3)}...`}
+                                                    autoFocus
+                                                />
+                                                <Key className="absolute right-6 top-1/2 -translate-y-1/2 text-muted-foreground/30" size={20} />
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground font-medium italic">
+                                                * Your keys are encrypted locally before transmission.
+                                            </p>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -232,28 +265,101 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step === 4 && (
                             <div className="space-y-8">
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Finally, where should **{agent.name}** live? You can connect various social channels now or skip and configure them later.
+                                    Where should **{agent.name}** live? Select the communication channels you want to activate.
                                 </p>
-                                <div className="p-8 rounded-3xl bg-white/5 border border-white/5 space-y-6">
-                                    <div className="flex items-center gap-4">
-                                        <div className="size-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center">
-                                            <MessageSquare size={20} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <h4 className="font-black text-xs uppercase tracking-widest">Telegram Integration</h4>
-                                            <p className="text-[10px] text-muted-foreground font-bold">Bot Token (from @BotFather)</p>
-                                        </div>
-                                    </div>
-                                    <input
-                                        type="password"
-                                        value={config.telegramToken}
-                                        onChange={(e) => setConfig({ ...config, telegramToken: e.target.value })}
-                                        className="w-full bg-black/20 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-blue-400 outline-none transition-all"
-                                        placeholder="123456789:ABCDefgh..."
-                                    />
+                                <div className="grid grid-cols-2 gap-4">
+                                    {[
+                                        { id: 'telegram', name: 'Telegram', icon: <Send size={20} className="text-blue-400" /> },
+                                        { id: 'discord', name: 'Discord', icon: <Hash size={20} className="text-indigo-400" /> },
+                                        { id: 'whatsapp', name: 'WhatsApp', icon: <MessageCircle size={20} className="text-green-400" /> },
+                                        { id: 'slack', name: 'Slack', icon: <Slack size={20} className="text-amber-400" /> },
+                                    ].map(c => (
+                                        <button
+                                            key={c.id}
+                                            onClick={() => setConfig({
+                                                ...config,
+                                                channels: { ...config.channels, [c.id]: !(config.channels as any)[c.id] }
+                                            })}
+                                            className={`p-6 rounded-2xl border transition-all flex flex-col items-center gap-4 text-center ${(config.channels as any)[c.id]
+                                                ? 'border-primary bg-primary/10 text-primary'
+                                                : 'border-white/5 bg-white/5 hover:bg-white/10 text-muted-foreground'
+                                                }`}
+                                        >
+                                            <div className="size-10 rounded-xl bg-white/10 flex items-center justify-center">
+                                                {c.icon}
+                                            </div>
+                                            <span className="font-bold text-xs uppercase tracking-widest">{c.name}</span>
+                                            {(config.channels as any)[c.id] && <div className="absolute top-4 right-4 text-primary"><Check size={14} /></div>}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
                         )}
+
+                        {step === 5 && (
+                            <div className="space-y-8 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                                <p className="text-sm font-medium text-muted-foreground leading-relaxed">
+                                    Configure credentials for your active channels.
+                                </p>
+
+                                {Object.values(config.channels).every(v => !v) && (
+                                    <div className="p-6 rounded-2xl border border-dashed border-white/10 text-center text-muted-foreground text-xs">
+                                        No channels selected. Agent will be headless.
+                                    </div>
+                                )}
+
+                                {config.channels.telegram && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><Send size={12} /> Telegram Bot Token</label>
+                                        <input
+                                            type="password"
+                                            value={config.telegramToken}
+                                            onChange={(e) => setConfig({ ...config, telegramToken: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
+                                            placeholder="123456789:ABCDefgh..."
+                                        />
+                                    </div>
+                                )}
+                                {config.channels.discord && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><Hash size={12} /> Discord Bot Token</label>
+                                        <input
+                                            type="password"
+                                            value={config.discordToken}
+                                            onChange={(e) => setConfig({ ...config, discordToken: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
+                                            placeholder="MTA..."
+                                        />
+                                    </div>
+                                )}
+                                {config.channels.whatsapp && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><MessageCircle size={12} /> WhatsApp Business Token</label>
+                                        <input
+                                            type="password"
+                                            value={config.whatsappToken}
+                                            onChange={(e) => setConfig({ ...config, whatsappToken: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
+                                            placeholder="EAAG..."
+                                        />
+                                    </div>
+                                )}
+                                {config.channels.slack && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><Slack size={12} /> Slack Bot Token</label>
+                                        <input
+                                            type="password"
+                                            value={config.slackToken}
+                                            onChange={(e) => setConfig({ ...config, slackToken: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
+                                            placeholder="xoxb-..."
+                                        />
+                                    </div>
+                                )}
+
+                            </div>
+                        )}
+
                     </div>
 
                     <footer className="mt-12 flex gap-4">
@@ -268,7 +374,8 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step < steps.length ? (
                             <button
                                 onClick={() => setStep(step + 1)}
-                                className="flex-1 py-4 rounded-2xl bg-white text-black hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2"
+                                disabled={step === 2 && config.provider !== 'blueprint_shared' && !config.token}
+                                className="flex-1 py-4 rounded-2xl bg-white text-black hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 Continue <ArrowRight size={16} />
                             </button>
@@ -279,7 +386,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                 className="flex-1 py-4 rounded-2xl bg-primary text-white hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-primary/20 disabled:opacity-50"
                             >
                                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                                Initialize Neural Matrix
+                                Create Neural Matrix
                             </button>
                         )}
                     </footer>

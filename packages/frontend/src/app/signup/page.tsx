@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase';
-import { Bot, Sparkles, ArrowRight, Github, ShieldCheck } from 'lucide-react';
+import { Bot, Sparkles, ArrowRight, Github, ShieldCheck, X } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -51,6 +51,12 @@ export default function SignupPage() {
 
             <div className="w-full max-w-lg relative z-10">
                 <div className="glass-card rounded-[3rem] p-8 md:p-12 shadow-2xl border-white/5 bg-white/[0.02]">
+                    <div className="absolute top-6 right-6 z-20">
+                        <Link href="/" className="p-2 text-muted-foreground/50 hover:text-white transition-colors rounded-xl hover:bg-white/5 block">
+                            <X size={24} />
+                        </Link>
+                    </div>
+
                     <div className="flex flex-col items-center text-center mb-10">
                         <div className="size-16 rounded-2xl bg-gradient-unicorn p-0.5 shadow-lg shadow-primary/20 mb-6 group animate-glow">
                             <div className="w-full h-full bg-background rounded-[calc(1rem-2px)] flex items-center justify-center">

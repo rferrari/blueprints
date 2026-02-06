@@ -4,16 +4,17 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, ShoppingBag, Settings, LogOut, Bot, Sparkles, Zap, ChevronRight, Menu, X, Plus, Loader2, Trash2 } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Settings, LogOut, Bot, Sparkles, Zap, ChevronRight, Menu, X, Plus, Loader2, Trash2, Check, Shield } from 'lucide-react';
 import ProjectView from '@/components/project-view';
 import Marketplace from '@/components/marketplace';
 import ConfirmationModal from '@/components/confirmation-modal';
+import SettingsView from '@/components/settings-view';
 
 export default function DashboardPage() {
     const [user, setUser] = useState<any>(null);
     const [view, setView] = useState<'projects' | 'marketplace' | 'settings'>('projects');
     const [selectedProject, setSelectedProject] = useState<string | null>(null);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Default closed for mobile
     const [projects, setProjects] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const supabase = createClient();
@@ -76,6 +77,20 @@ export default function DashboardPage() {
     });
     const [isDeleting, setIsDeleting] = useState(false);
 
+    // Upgrade Modal State
+    const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+
+    // Random Hints
+    const [clusterHint, setClusterHint] = useState('e.g. Sales Unit B');
+    useEffect(() => {
+        const hints = [
+            'e.g. Sales Unit B', 'e.g. Research Division', 'e.g. Alpha Squad', 'e.g. Customer Support',
+            'e.g. Creative Studio', 'e.g. Data Ops', 'e.g. Security Detail', 'e.g. Trading Bot',
+            'e.g. Content Team', 'e.g. Dev Cluster'
+        ];
+        setClusterHint(hints[Math.floor(Math.random() * hints.length)]);
+    }, [isCreateModalOpen]); // Update hint when modal opens
+
     const handleCreateProject = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newProjectName.trim() || !user) return;
@@ -98,6 +113,8 @@ export default function DashboardPage() {
                 setProjects(prev => [...prev, newProject]);
                 setIsCreateModalOpen(false);
                 setNewProjectName('');
+                // Auto-navigate to new cluster
+                setSelectedProject(newProject.id);
             } else {
                 const errData = await res.json();
                 setCreateError(errData.message || 'Initialization failed. Check backend RLS configuration.');
@@ -154,6 +171,7 @@ export default function DashboardPage() {
             onClick={() => {
                 setView(id);
                 setSelectedProject(null);
+                setIsSidebarOpen(false); // Close sidebar on mobile navigation
             }}
             className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-300 group relative overflow-hidden ${view === id && !selectedProject
                 ? 'bg-primary/10 text-primary'
@@ -205,7 +223,12 @@ export default function DashboardPage() {
                             </div>
                             <p className="text-xs font-bold text-white mb-1">Unicorn Plan</p>
                             <p className="text-[10px] text-muted-foreground mb-3 font-medium">Unlock Unlimited Agents</p>
-                            <button className="w-full py-2 bg-primary hover:bg-primary/90 text-[10px] font-black uppercase tracking-widest rounded-lg transition-colors shadow-lg shadow-primary/20">Upgrade</button>
+                            <button
+                                onClick={() => setIsUpgradeModalOpen(true)}
+                                className="w-full py-2 bg-primary hover:bg-primary/90 text-[10px] font-black uppercase tracking-widest rounded-lg transition-colors shadow-lg shadow-primary/20"
+                            >
+                                Upgrade
+                            </button>
                         </div>
 
                         <button
@@ -351,12 +374,8 @@ export default function DashboardPage() {
                                 <Marketplace projectId={selectedProject || 'default'} />
                             </div>
                         ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-muted-foreground animate-in fade-in duration-500">
-                                <div className="size-20 rounded-3xl bg-white/5 flex items-center justify-center mb-6">
-                                    <Settings size={40} className="opacity-20" />
-                                </div>
-                                <h3 className="text-xl font-bold mb-2">System Parameters</h3>
-                                <p className="max-w-xs text-center font-medium opacity-60">Global configuration for your infrastructure will appear here.</p>
+                            <div className="h-full">
+                                <SettingsView user={user} />
                             </div>
                         )}
                     </div>
@@ -394,7 +413,7 @@ export default function DashboardPage() {
                                             setNewProjectName(e.target.value);
                                             setCreateError(null);
                                         }}
-                                        placeholder="e.g. Sales Unit B, Dev Cluster"
+                                        placeholder={clusterHint}
                                         className="w-full rounded-2xl border border-white/5 bg-white/5 px-6 py-4 focus:border-primary/50 focus:bg-white/[0.08] outline-none transition-all duration-300 placeholder:text-muted-foreground/30 font-bold"
                                         autoFocus
                                     />
@@ -444,6 +463,71 @@ export default function DashboardPage() {
                     isLoading={isDeleting}
                     type="danger"
                 />
+
+                {/* Upgrade Modal */}
+                {isUpgradeModalOpen && (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300">
+                        <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" onClick={() => setIsUpgradeModalOpen(false)} />
+
+                        <div className="relative w-full max-w-5xl glass-card rounded-[3rem] p-8 md:p-12 shadow-2xl border-white/5 bg-white/[0.02] animate-in zoom-in-95 slide-in-from-bottom-10 duration-500 max-h-[90vh] overflow-y-auto custom-scrollbar">
+                            <div className="text-center mb-12">
+                                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
+                                    <Sparkles size={14} className="text-primary" />
+                                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Upgrade Your Capacity</span>
+                                </div>
+                                <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">Choose Your Power Source</h2>
+                                <p className="text-muted-foreground font-medium max-w-lg mx-auto">
+                                    Scale your agent infrastructure with dedicated compute and priority support.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                {/* Starter */}
+                                <div className="p-8 rounded-[2rem] border border-white/5 bg-white/[0.02] flex flex-col relative overflow-hidden group hover:border-white/10 transition-colors">
+                                    <h3 className="text-xl font-bold mb-2">Starter</h3>
+                                    <div className="mb-6"><span className="text-3xl font-black">Free</span></div>
+                                    <ul className="space-y-4 mb-8 flex-1">
+                                        <li className="flex items-center gap-3 text-sm font-medium text-muted-foreground"><Check size={16} className="text-white" /> 1 Active Agent</li>
+                                        <li className="flex items-center gap-3 text-sm font-medium text-muted-foreground"><Check size={16} className="text-white" /> Shared Compute</li>
+                                        <li className="flex items-center gap-3 text-sm font-medium text-muted-foreground"><Check size={16} className="text-white" /> Community Support</li>
+                                    </ul>
+                                    <button className="w-full py-4 rounded-xl border border-white/10 font-bold text-xs uppercase tracking-widest hover:bg-white/5 transition-colors">Current Plan</button>
+                                </div>
+
+                                {/* Pro */}
+                                <div className="p-8 rounded-[2rem] border border-primary/50 bg-primary/5 flex flex-col relative overflow-hidden ring-4 ring-primary/10">
+                                    <div className="absolute top-0 right-0 bg-primary px-4 py-1 rounded-bl-xl text-[10px] font-black uppercase tracking-widest text-white">Popular</div>
+                                    <h3 className="text-xl font-bold mb-2 text-white">Pro</h3>
+                                    <div className="mb-6"><span className="text-3xl font-black">$29</span><span className="text-sm font-bold text-muted-foreground">/mo</span></div>
+                                    <ul className="space-y-4 mb-8 flex-1">
+                                        <li className="flex items-center gap-3 text-sm font-bold text-white"><Check size={16} className="text-primary" /> 10 Active Agents</li>
+                                        <li className="flex items-center gap-3 text-sm font-bold text-white"><Check size={16} className="text-primary" /> 4GB Neural Memory</li>
+                                        <li className="flex items-center gap-3 text-sm font-bold text-white"><Check size={16} className="text-primary" /> Priority Processing</li>
+                                        <li className="flex items-center gap-3 text-sm font-bold text-white"><Check size={16} className="text-primary" /> Email Support</li>
+                                    </ul>
+                                    <button className="w-full py-4 rounded-xl bg-primary text-white font-bold text-xs uppercase tracking-widest hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20">Apply Now</button>
+                                </div>
+
+                                {/* Enterprise */}
+                                <div className="p-8 rounded-[2rem] border border-white/5 bg-white/[0.02] flex flex-col relative overflow-hidden group hover:border-purple-500/30 transition-colors">
+                                    <h3 className="text-xl font-bold mb-2">Enterprise</h3>
+                                    <div className="mb-6"><span className="text-3xl font-black">Custom</span></div>
+                                    <ul className="space-y-4 mb-8 flex-1">
+                                        <li className="flex items-center gap-3 text-sm font-medium text-muted-foreground"><Shield size={16} className="text-purple-400" /> Unlimited Agents</li>
+                                        <li className="flex items-center gap-3 text-sm font-medium text-muted-foreground"><Shield size={16} className="text-purple-400" /> Isolated VPC</li>
+                                        <li className="flex items-center gap-3 text-sm font-medium text-muted-foreground"><Shield size={16} className="text-purple-400" /> Custom Models</li>
+                                        <li className="flex items-center gap-3 text-sm font-medium text-muted-foreground"><Shield size={16} className="text-purple-400" /> 24/7 SLA</li>
+                                    </ul>
+                                    <button className="w-full py-4 rounded-xl border border-white/10 font-bold text-xs uppercase tracking-widest hover:bg-white text-black transition-all">Contact Sales</button>
+                                </div>
+                            </div>
+
+                            <div className="mt-8 text-center">
+                                <button onClick={() => setIsUpgradeModalOpen(false)} className="text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-white transition-colors">No thanks, maybe later</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </main>
         </div>
     );

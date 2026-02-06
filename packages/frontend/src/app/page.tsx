@@ -64,7 +64,7 @@ export default function LandingPage() {
                                 <Bot size={20} className="text-white" />
                             </div>
                         </div>
-                        <span className="text-xl font-black tracking-tighter uppercase">Blue<span className="text-primary">prints</span></span>
+                        <span className="text-xl font-black tracking-tighter uppercase hidden md:block">Blue<span className="text-primary">prints</span></span>
                     </div>
 
                     <div className="flex items-center gap-8">
@@ -82,13 +82,17 @@ export default function LandingPage() {
                                 Dashboard
                             </Link>
                         ) : (
-                            <div className="flex items-center gap-4">
-                                <Link href="/login" className="text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-white transition-colors">Sign In</Link>
+                            <div className="flex items-center gap-3 md:gap-4">
+                                <Link href="/login" className="text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-white transition-colors">
+                                    <span className="hidden md:inline">Sign In</span>
+                                    <span className="md:hidden"><Zap size={20} /></span>
+                                </Link>
                                 <Link
                                     href="/signup"
-                                    className="px-6 py-2.5 bg-primary text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-primary/90 transition-all active:scale-95 shadow-xl shadow-primary/20"
+                                    className="px-4 md:px-6 py-2.5 bg-primary text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-primary/90 transition-all active:scale-95 shadow-xl shadow-primary/20 flex items-center gap-2"
                                 >
-                                    Get Started
+                                    <span className="hidden md:inline">Get Started</span>
+                                    <span className="md:hidden"><Sparkles size={18} /></span>
                                 </Link>
                             </div>
                         )}
@@ -132,8 +136,33 @@ export default function LandingPage() {
                 </div>
             </section>
 
+            {/* Powered By Section */}
+            <div className="py-12 border-y border-white/5 bg-white/[0.02]">
+                <div className="max-w-7xl mx-auto px-6 text-center">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40 mb-8">Powering the Next Generation of AI Agents</p>
+                    <div className="flex flex-wrap justify-center items-center gap-12 md:gap-24 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
+                        <div className="flex items-center gap-3">
+                            <div className="size-8 rounded bg-white text-black flex items-center justify-center font-bold text-xs">EO</div>
+                            <span className="font-bold text-lg text-white">ElizaOS</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="size-8 rounded bg-blue-500 flex items-center justify-center text-white">
+                                <Zap size={16} fill="currentColor" />
+                            </div>
+                            <span className="font-bold text-lg text-white">OpenClaw</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="size-8 rounded bg-purple-500 flex items-center justify-center text-white">
+                                <Bot size={16} />
+                            </div>
+                            <span className="font-bold text-lg text-white">Blueprints Engine</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Features Grid */}
-            <section id="features" className="py-32 px-6 bg-white/[0.01]">
+            <section id="features" className="py-32 px-6">
                 <div className="max-w-7xl mx-auto">
                     <div className="text-center mb-24">
                         <h2 className="text-4xl font-black tracking-tighter mb-4">Core Infrastructure</h2>
@@ -217,9 +246,9 @@ export default function LandingPage() {
                     </div>
 
                     <div className="flex gap-12 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-                        <a href="#" className="hover:text-white transition-colors">Documentation</a>
-                        <a href="#" className="hover:text-white transition-colors">Infrastructure</a>
-                        <a href="#" className="hover:text-white transition-colors">Terms of Phase</a>
+                        <Link href="/documentation" className="hover:text-white transition-colors">Documentation</Link>
+                        <Link href="/infrastructure" className="hover:text-white transition-colors">Infrastructure</Link>
+                        <Link href="/terms" className="hover:text-white transition-colors">Terms of Phase</Link>
                     </div>
 
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-30">

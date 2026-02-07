@@ -16,6 +16,9 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
     const { session } = useAuth();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [fetching, setFetching] = useState(true);
+    const [thinkingTime, setThinkingTime] = useState(0);
     const [agentModel, setAgentModel] = useState<string>('LLM');
     const scrollRef = useRef<HTMLDivElement>(null);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -84,7 +87,7 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
                     setLoading(false);
                 }
 
-                setMessages(prev => {
+                setMessages((prev: ChatMessage[]) => {
                     if (prev.find(m => m.id === newMessage.id)) return prev;
                     const updated = [...prev, newMessage];
                     // Immediate scroll for new messages

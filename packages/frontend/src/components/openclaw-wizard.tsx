@@ -57,7 +57,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                 // If current modelId is not in the list, or we want to suggest one
                 if (!config.modelId || !data.data.find((m: any) => m.id === config.modelId)) {
                     const defaultModel = data.data.find((m: any) => m.id.includes('70b')) || data.data[0];
-                    if (defaultModel) setConfig(prev => ({ ...prev, modelId: defaultModel.id }));
+                    if (defaultModel) setConfig((prev: any) => ({ ...prev, modelId: defaultModel.id }));
                 }
             }
         } catch (err: any) {

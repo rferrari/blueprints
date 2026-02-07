@@ -75,18 +75,27 @@ else
         if [ ! -z "$WORKER_CONTAINER" ]; then
             IP=$(docker inspect $AGENT --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
             echo "   Worker -> Agent Connectivity Test ($IP:18789):"
-            # docker exec $WORKER_CONTAINER curl -s -o /dev/null -w "%{http_code}" http://$IP:18789/v1/chat/completions -H "Authorization: Bearer test" > /dev/null 2>&1
-            TEST_RESULT=$(docker exec $WORKER_CONTAINER curl -s -o /dev/null -w "%{http_code}" http://$IP:18789/v1/chat/completions -H "Authorization: Bearer $TOKEN")
+            
+            # Try curl first
+            TEST_RESULT=$(docker exec $WORKER_CONTAINER curl -s -o /dev/null -w "%{http_code}" http://$IP:18789/v1/chat/completions -H "Authorization: Bearer $TOKEN" 2>/dev/null)
+            
+            # If curl fails (returns empty or error), try wget
+            if [ -z "$TEST_RESULT" ] || [ "$TEST_RESULT" == "000" ]; then
+                # wget --spider --server-response returns status on stderr
+                TEST_RESULT=$(docker exec $WORKER_CONTAINER wget --spider --server-response --header="Authorization: Bearer $TOKEN" http://$IP:18789/v1/chat/completions 2>&1 | awk '/HTTP\// {print $2}' | tail -1)
+            fi
+
             if [ "$TEST_RESULT" == "403" ]; then
-                echo "      ⚠️ Connectivity test returned 403 (Expected if token mismatch or test hit)"
+                echo "      ⚠️ Connectivity test returned 403 (Unauthorized - check token/agent-id)"
             elif [ "$TEST_RESULT" == "401" ]; then
                 echo "      ❌ Connectivity test returned 401 (Unauthorized - check token scope)"
-            elif [ "$TEST_RESULT" == "404" ]; then
-                echo "      ❌ Connectivity test returned 404 (Endpoint not found?)"
-            elif [ "$TEST_RESULT" == "000" ]; then
-                echo "      ❌ Connectivity test FAILED (No response)"
+            elif [ "$TEST_RESULT" == "200" ] || [ "$TEST_RESULT" == "405" ]; then
+                # 405 is actually fine here because we are doing a GET (spider) on a POST-only endpoint
+                echo "      ✅ Connectivity test returned: $TEST_RESULT (Success/Reachable)"
+            elif [ -z "$TEST_RESULT" ]; then
+                echo "      ❌ Connectivity test FAILED (Neither curl nor wget found/working)"
             else
-                echo "      ✅ Connectivity test returned: $TEST_RESULT"
+                echo "      ❌ Connectivity test returned: $TEST_RESULT"
             fi
         fi
         echo ""

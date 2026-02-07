@@ -609,7 +609,7 @@ async function handleUserMessage(payload: any) {
                         headers: {
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${token}`,
-                            'x-openclaw-agent-id': 'main',
+                            'x-openclaw-agent-id': agent_id,
                             'Connection': 'close'
                         },
                         timeout: 10000

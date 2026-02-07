@@ -19,18 +19,33 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(true);
     const [thinkingTime, setThinkingTime] = useState(0);
+    const [agentModel, setAgentModel] = useState<string>('LLM');
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    const scrollToBottom = () => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    };
 
     useEffect(() => {
         let interval: NodeJS.Timeout;
         if (loading) {
             setThinkingTime(0);
+            scrollToBottom();
             interval = setInterval(() => {
                 setThinkingTime(prev => prev + 1);
             }, 1000);
         }
         return () => clearInterval(interval);
     }, [loading]);
+
+    // Auto-scroll when thinking time updates (to keep new bubbles in view)
+    useEffect(() => {
+        if (loading && thinkingTime % 2 === 0) {
+            scrollToBottom();
+        }
+    }, [thinkingTime, loading]);
 
     const supabase = createClient();
 
@@ -70,6 +85,39 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [messages]);
+
+    useEffect(() => {
+        if (session?.access_token) {
+            fetchAgentDetails();
+        }
+    }, [agentId, session]);
+
+    const fetchAgentDetails = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('agent_desired_state')
+                .select('config')
+                .eq('agent_id', agentId)
+                .single();
+
+            if (error) throw error;
+            if (data?.config) {
+                // Config is likely JSON or needs decryption if it's the encrypted version
+                // For the frontend, we usually have a way to view it
+                // Let's assume for now it's accessible or if it's encrypted, we display a generic 'Agent' name
+                const config = data.config;
+                const primaryModel = config.agents?.defaults?.model?.primary ||
+                    config.models?.providers?.venice?.models?.[0]?.id ||
+                    'AI';
+
+                // Clean up model name (e.g., 'venice/llama-3.3-70b' -> 'Llama-3.3-70B')
+                const modelName = primaryModel.split('/').pop().toUpperCase();
+                setAgentModel(modelName);
+            }
+        } catch (err) {
+            console.error('Failed to fetch agent details:', err);
+        }
+    };
 
     const fetchChatHistory = async () => {
         try {
@@ -192,7 +240,11 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
                             <div className="p-4 rounded-[1.5rem] bg-white/5 border border-white/5 text-slate-400 rounded-tl-none flex items-center gap-3">
                                 <Loader2 size={14} className="animate-spin text-primary" />
                                 <span className="text-xs font-bold uppercase tracking-widest italic animate-pulse">
-                                    Thinking{thinkingTime > 0 ? `... (${thinkingTime}s)` : '...'}
+                                    {thinkingTime < 5 ? 'Neural Initializing' :
+                                        thinkingTime < 15 ? `Querying ${agentModel}` :
+                                            thinkingTime < 30 ? 'Synthesizing Thought Matrix' :
+                                                'Heavy Inference in Progress'}
+                                    {thinkingTime > 0 ? ` (${thinkingTime}s)` : '...'}
                                 </span>
                             </div>
                         </div>

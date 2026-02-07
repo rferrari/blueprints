@@ -3,6 +3,7 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import 'dotenv/config';
+import { cryptoUtils } from './lib/crypto';
 
 // Simple Logger with levels
 const LogLevels = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
@@ -87,6 +88,17 @@ const failureCounts = new Map<string, number>();
 const MAX_RETRIES = 3;
 
 let isReconciling = false;
+
+// Track applied config hashes to detect changes
+const configHashes = new Map<string, string>();
+
+function getConfigHash(config: any): string {
+    if (!config) return 'empty';
+    const str = typeof config === 'string' ? config : JSON.stringify(config);
+    return crypto.createHash('md5').update(str).digest('hex');
+}
+
+import crypto from 'node:crypto';
 
 async function reconcile() {
     if (isReconciling) return;
@@ -190,18 +202,35 @@ async function reconcile() {
                 // }
             }
 
-            if (shouldBeRunning && !isRunning) {
+            const currentHash = getConfigHash(desired.config);
+            const lastHash = configHashes.get(agent.id);
+            const configChanged = lastHash && lastHash !== currentHash;
+
+            if (shouldBeRunning && (!isRunning || configChanged)) {
+                if (configChanged && isRunning) {
+                    logger.info(`Configuration changed for agent ${agent.id}. Restarting...`);
+                    if (agent.framework === 'openclaw') {
+                        await stopOpenClawAgent(agent.id);
+                    } else {
+                        await stopElizaAgent(agent.id);
+                    }
+                }
                 if (agent.framework === 'openclaw') {
                     await startOpenClawAgent(agent.id, desired.config);
                 } else {
                     await startElizaAgent(agent.id, desired.config);
                 }
+                configHashes.set(agent.id, currentHash);
             } else if (!shouldBeRunning && isRunning) {
                 if (agent.framework === 'openclaw') {
                     await stopOpenClawAgent(agent.id);
                 } else {
                     await stopElizaAgent(agent.id);
                 }
+                configHashes.delete(agent.id);
+            } else if (shouldBeRunning && isRunning && !lastHash) {
+                // Initialize hash for already running agent
+                configHashes.set(agent.id, currentHash);
             }
         }
     } finally {
@@ -340,13 +369,15 @@ async function startOpenClawAgent(agentId: string, config: any) {
 
                 // Ensure workspace and config file exist even if container is running
                 const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
-                if (!fs.existsSync(workspacePath)) {
-                    fs.mkdirSync(workspacePath, { recursive: true });
+                const openclawDir = path.join(workspacePath, '.openclaw');
+                if (!fs.existsSync(openclawDir)) {
+                    fs.mkdirSync(openclawDir, { recursive: true });
                 }
-                const configPath = path.join(workspacePath, 'openclaw.json');
+                const configPath = path.join(openclawDir, 'openclaw.json');
                 if (!fs.existsSync(configPath)) {
                     logger.warn(`Config file ${configPath} missing for running container. Re-creating...`);
-                    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+                    const finalConfig = cryptoUtils.decryptConfig(config);
+                    fs.writeFileSync(configPath, JSON.stringify(finalConfig, null, 2));
                 }
 
                 const { error: syncError } = await supabase.from('agent_actual_state').upsert({
@@ -389,13 +420,16 @@ async function startOpenClawAgent(agentId: string, config: any) {
         const configPath = path.join(openclawDir, 'openclaw.json');
 
         // Ensure gateway mode is set to local to bypass onboarding
-        const finalConfig = {
+        const configWithDefaults = {
             ...config,
             gateway: {
                 ...(config.gateway || {}),
-                mode: 'local'
+                mode: 'local',
+                bind: 'lan'
             }
         };
+
+        const finalConfig = cryptoUtils.decryptConfig(configWithDefaults);
 
         logger.info(`Writing OpenClaw config to ${configPath}...`);
         fs.writeFileSync(configPath, JSON.stringify(finalConfig, null, 2));
@@ -543,7 +577,7 @@ async function handleUserMessage(payload: any) {
                 .eq('agent_id', agent_id)
                 .single();
 
-            const config = (desired?.config as any) || {};
+            const config = cryptoUtils.decryptConfig((desired?.config as any) || {});
 
 
             const token = config.gateway?.auth?.token;

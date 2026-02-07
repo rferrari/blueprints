@@ -19,7 +19,8 @@ const availablePlugins = [
 ];
 
 export default function AgentEditor({ agent, actual, onSave, onClose }: AgentEditorProps) {
-    const initialConfig = agent.agent_desired_state?.[0]?.config || {};
+    const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
+    const initialConfig = getOne(agent.agent_desired_state)?.config || {};
     const [config, setConfig] = useState(initialConfig);
     const [mode, setMode] = useState<'form' | 'json'>('form');
     const [activeTab, setActiveTab] = useState<'profile' | 'behavior' | 'style' | 'plugins' | 'secrets' | 'logs'>('profile');

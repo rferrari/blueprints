@@ -273,7 +273,8 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
                 ) : (
                     <AgentEditor
                         agent={editingAgent}
-                        actual={agents.find(a => a.id === editingAgent.id)?.agent_actual_state?.[0] || { status: 'stopped' }}
+                        // Use robust fetching for actual state
+                        actual={(Array.isArray(editingAgent.agent_actual_state) ? editingAgent.agent_actual_state[0] : editingAgent.agent_actual_state) || { status: 'stopped' }}
                         onSave={saveAgentConfig}
                         onClose={() => setEditingAgent(null)}
                     />

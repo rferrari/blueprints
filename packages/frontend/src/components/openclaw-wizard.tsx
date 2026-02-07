@@ -10,7 +10,8 @@ interface OpenClawWizardProps {
 }
 
 export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizardProps) {
-    const existingConfig = agent.agent_desired_state?.[0]?.config || {};
+    const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
+    const existingConfig = getOne(agent.agent_desired_state)?.config || {};
     const [step, setStep] = useState(1);
     const [saving, setSaving] = useState(false);
 
@@ -18,7 +19,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     const [config, setConfig] = useState({
         provider: existingConfig.auth?.profiles?.['default']?.provider || 'venice', // Default to Venice
         mode: 'api_key', // Enforce API Key
-        token: existingConfig.auth?.profiles?.['default']?.token || '',
+        token: existingConfig.models?.providers?.[existingConfig.auth?.profiles?.['default']?.provider]?.apiKey || '',
         gatewayToken: existingConfig.gateway?.auth?.token || Math.random().toString(36).substring(2, 15),
 
         // Channels
@@ -78,8 +79,11 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             }
 
             const finalConfig = {
+                ...existingConfig,
                 auth: {
+                    ...(existingConfig.auth || {}),
                     profiles: {
+                        ...(existingConfig.auth?.profiles || {}),
                         'default': {
                             provider: config.provider,
                             mode: 'api_key'
@@ -87,7 +91,9 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                     }
                 },
                 models: {
+                    ...(existingConfig.models || {}),
                     providers: {
+                        ...(existingConfig.models?.providers || {}),
                         [config.provider]: {
                             apiKey: config.token,
                             baseUrl,
@@ -98,29 +104,40 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                     }
                 },
                 agents: {
+                    ...(existingConfig.agents || {}),
                     defaults: {
+                        ...(existingConfig.agents?.defaults || {}),
                         workspace: `/home/node/.openclaw`,
                         model: {
+                            ...(existingConfig.agents?.defaults?.model || {}),
                             primary: `${config.provider}/${modelId}`
                         },
                         models: {
+                            ...(existingConfig.agents?.defaults?.models || {}),
                             [`${config.provider}/${modelId}`]: {}
                         }
                     }
                 },
                 gateway: {
+                    ...(existingConfig.gateway || {}),
                     auth: {
+                        ...(existingConfig.gateway?.auth || {}),
                         mode: 'token',
                         token: config.gatewayToken
                     },
                     bind: 'lan',
                     http: {
+                        ...(existingConfig.gateway?.http || {}),
                         endpoints: {
+                            ...(existingConfig.gateway?.http?.endpoints || {}),
                             chatCompletions: { enabled: true }
                         }
                     }
                 },
-                channels: channelsConfig
+                channels: {
+                    ...(existingConfig.channels || {}),
+                    ...channelsConfig
+                }
             };
 
             await onSave(finalConfig);

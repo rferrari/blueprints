@@ -18,7 +18,20 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(true);
+    const [thinkingTime, setThinkingTime] = useState(0);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (loading) {
+            setThinkingTime(0);
+            interval = setInterval(() => {
+                setThinkingTime(prev => prev + 1);
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [loading]);
+
     const supabase = createClient();
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -170,6 +183,21 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
                         </div>
                     </div>
                 ))}
+                {loading && (
+                    <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <div className="flex gap-3 max-w-[80%] flex-row">
+                            <div className="size-8 rounded-xl flex items-center justify-center shrink-0 shadow-lg bg-primary text-white">
+                                <Bot size={16} />
+                            </div>
+                            <div className="p-4 rounded-[1.5rem] bg-white/5 border border-white/5 text-slate-400 rounded-tl-none flex items-center gap-3">
+                                <Loader2 size={14} className="animate-spin text-primary" />
+                                <span className="text-xs font-bold uppercase tracking-widest italic animate-pulse">
+                                    Thinking{thinkingTime > 0 ? `... (${thinkingTime}s)` : '...'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Input Area */}

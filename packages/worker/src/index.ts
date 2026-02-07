@@ -680,11 +680,18 @@ async function handleUserMessage(payload: any) {
                             'x-openclaw-agent-id': agent_id,
                             'Connection': 'close'
                         },
-                        timeout: 10000
+                        timeout: 120000
                     });
 
                     const result = res.data;
                     agentResponseContent = result.choices?.[0]?.message?.content || agentResponseContent;
+
+                    // Detect internal OpenClaw provider timeout (returns 200 OK but "No reply from agent.")
+                    if (agentResponseContent === 'No reply from agent.') {
+                        agentResponseContent = `[PROVIDER TIMEOUT]: ${agentResponseContent}`;
+                        logger.error(`Message Bus: [PROVIDER TIMEOUT] for agent ${agent_id}`);
+                    }
+
                     success = true;
                 } catch (err: any) {
                     const isConnRefused = err.code === 'ECONNREFUSED' || err.message?.includes('Unable to connect');

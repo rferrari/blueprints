@@ -9,7 +9,7 @@ SERVICE_NAME="worker"
 LOG_FILE="/var/log/blueprints-deploy.log"
 
 # Ensure Bun is in PATH (common locations)
-export PATH=$PATH:/root/.bun/bin:/usr/local/bin:/home/ubuntu/.bun/bin:/home/debian/.bun/bin
+export PATH=$PATH:/root/.bun/bin:/usr/local/bin:/home/ubuntu/.bun/bin:/home/debian/.bun/bin:/home/ricardo/.bun/bin:/home/adam/.bun/bin
 
 # function to log messages
 log() {
@@ -28,8 +28,8 @@ else
     log "Warning: $REPO_DIR not found, using current directory: $(pwd)"
 fi
 
-# Fetch latest changes
-git fetch origin main
+# Fetch latest changes - use "origin" to ensure tracking branch is updated
+git fetch origin
 
 # Check if local is behind remote
 LOCAL=$(git rev-parse HEAD)

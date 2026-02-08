@@ -46,5 +46,12 @@ pnpm run build
 echo "🐳 Building Docker image openclaw:local..."
 docker build -t openclaw:local .
 
+# Verify image exists
+docker image inspect openclaw:local >/dev/null || exit 1
+
+# 5. Clean up
+echo "🧹 Cleaning up..."
+rm -rf "$TARGET_DIR"
+
 echo "✅ OpenClaw image is ready!"
 echo "You can now run 'docker compose up -d' and the worker will be able to start agents."

@@ -365,6 +365,6 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
             {/* Background Decorations */}
             <div className="absolute -bottom-20 -left-20 size-60 bg-primary/5 rounded-full blur-[80px] pointer-events-none" />
             <div className="absolute -top-20 -right-20 size-60 bg-indigo-500/5 rounded-full blur-[80px] pointer-events-none" />
-        </div >
+        </div>
     );
 }

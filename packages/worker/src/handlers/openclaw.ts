@@ -34,7 +34,8 @@ export async function startOpenClawAgent(agentId: string, config: any) {
                 logger.info(`Container ${containerName} is already running. Syncing DB state.`);
 
                 // Ensure workspace and config file exist
-                const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
+                const projectRoot = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'));
+                const workspacePath = path.resolve(projectRoot, 'workspaces', agentId);
                 const openclawDir = path.join(workspacePath, '.openclaw');
                 if (!fs.existsSync(openclawDir)) {
                     fs.mkdirSync(openclawDir, { recursive: true });
@@ -62,22 +63,29 @@ export async function startOpenClawAgent(agentId: string, config: any) {
             // Container doesn't exist
         }
 
-        const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
+        const projectRoot = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'));
+        const workspacePath = path.resolve(projectRoot, 'workspaces', agentId);
         const openclawDir = path.join(workspacePath, '.openclaw');
+
         if (!fs.existsSync(openclawDir)) {
             fs.mkdirSync(openclawDir, { recursive: true });
         }
 
+        // Determine Host path for Docker (Must be absolute)
         const hostWorkspacesPath = process.env.HOST_WORKSPACES_PATH;
         let hostOpenclawDir = openclawDir;
 
         if (hostWorkspacesPath) {
-            hostOpenclawDir = path.join(hostWorkspacesPath, agentId, '.openclaw');
+            // Resolve relative to projectRoot always
+            const resolvedHostWorkspaces = path.isAbsolute(hostWorkspacesPath)
+                ? hostWorkspacesPath
+                : path.resolve(projectRoot, hostWorkspacesPath);
+            hostOpenclawDir = path.join(resolvedHostWorkspaces, agentId, '.openclaw');
         }
 
         const configPath = path.join(openclawDir, 'openclaw.json');
 
-        // Ensure gateway mode is set to local
+        // ... (config logic exactly as before)
         const configWithDefaults = {
             ...config,
             gateway: {
@@ -109,12 +117,43 @@ export async function startOpenClawAgent(agentId: string, config: any) {
             env.push(`OPENCLAW_GATEWAY_TOKEN=${finalConfig.gateway.auth.token}`);
         }
 
-        const uid = (process as any).getuid ? (process as any).getuid() : 1000;
-        const gid = (process as any).getgid ? (process as any).getgid() : 1000;
+        // Security Tiers: low (sandbox), pro (elevated), custom (root)
+        const tier = finalConfig.metadata?.security_tier || 'low';
+        let user = '1000:1000';
+        let capAdd: string[] = [];
+
+        if (tier === 'custom') {
+            user = '0:0'; // Root mode
+            logger.warn(`🚀 Agent ${agentId} starting in CUSTOM tier (ROOT PRIVILEGES)`);
+        } else if (tier === 'pro') {
+            user = '1000:1000';
+            capAdd = ['SYS_ADMIN']; // Example elevated privilege
+            logger.info(`🛡️ Agent ${agentId} starting in PRO tier (Elevated Sandbox)`);
+        } else {
+            logger.info(`🔒 Agent ${agentId} starting in LOW tier (Strict Sandbox)`);
+        }
+
+        // Verify image exists locally or attempt to pull
+        try {
+            await docker.inspectImage(OPENCLAW_IMAGE);
+        } catch (e: any) {
+            if (e.status === 404) {
+                logger.info(`Image ${OPENCLAW_IMAGE} not found locally. Attempting to pull...`);
+                try {
+                    await docker.pullImage(OPENCLAW_IMAGE);
+                    logger.info(`Successfully pulled image ${OPENCLAW_IMAGE}`);
+                } catch (pullErr: any) {
+                    logger.error(`Failed to pull image ${OPENCLAW_IMAGE}: ${pullErr.message}`);
+                    throw pullErr;
+                }
+            } else {
+                throw e;
+            }
+        }
 
         const newContainer = await docker.createContainer({
             Image: OPENCLAW_IMAGE,
-            User: `${uid}:${gid}`,
+            User: user,
             name: containerName,
             Env: env,
             Cmd: ['node', 'dist/index.js', 'gateway', '--bind', 'lan'],
@@ -122,7 +161,8 @@ export async function startOpenClawAgent(agentId: string, config: any) {
             HostConfig: {
                 Binds: [`${hostOpenclawDir}:/home/node/.openclaw`],
                 PortBindings: { '18789/tcp': [{ HostPort: hostPort.toString() }] },
-                RestartPolicy: { Name: 'unless-stopped' }
+                RestartPolicy: { Name: 'unless-stopped' },
+                CapAdd: capAdd
             },
             NetworkingConfig: {
                 EndpointsConfig: { [DOCKER_NETWORK_NAME]: {} }

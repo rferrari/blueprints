@@ -65,6 +65,36 @@ export const docker = {
         return this.getContainer(data.Id || data.Id);
     },
 
+    async inspectImage(name: string) {
+        return this._request('GET', `/images/${name}/json`);
+    },
+
+    async pullImage(name: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const options = {
+                socketPath: '/var/run/docker.sock',
+                path: `/v1.44/images/create?fromImage=${encodeURIComponent(name)}`,
+                method: 'POST'
+            };
+
+            const req = http.request(options, (res) => {
+                if (res.statusCode !== 200) {
+                    let data = '';
+                    res.on('data', chunk => data += chunk);
+                    res.on('end', () => reject(new Error(`Docker Pull Error (${res.statusCode}): ${data}`)));
+                    return;
+                }
+                // We just need to wait for the stream to end
+                res.on('data', () => { }); // Consume stream
+                res.on('end', () => resolve());
+                res.on('error', reject);
+            });
+
+            req.on('error', reject);
+            req.end();
+        });
+    },
+
     async createExec(id: string, config: any) {
         return this._request('POST', `/containers/${id}/exec`, config);
     },

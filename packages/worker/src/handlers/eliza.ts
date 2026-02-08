@@ -39,17 +39,44 @@ export async function startElizaAgent(agentId: string, config: any) {
         // Feature: Lore -> Knowledge transition
         const finalConfig = renameKey(decrypted, 'lore', 'knowledge');
 
-        const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
+        const projectRoot = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'));
+        const workspacePath = path.join(projectRoot, 'workspaces', agentId);
         if (!fs.existsSync(workspacePath)) fs.mkdirSync(workspacePath, { recursive: true });
 
         const characterPath = path.join(workspacePath, 'character.json');
         fs.writeFileSync(characterPath, JSON.stringify(finalConfig, null, 2));
 
         const hostWorkspacesPath = process.env.HOST_WORKSPACES_PATH;
-        const hostCharacterPath = hostWorkspacesPath ? path.join(hostWorkspacesPath, agentId, 'character.json') : characterPath;
+        let hostCharacterPath = characterPath;
+
+        if (hostWorkspacesPath) {
+            const resolvedHostWorkspaces = path.isAbsolute(hostWorkspacesPath)
+                ? hostWorkspacesPath
+                : path.resolve(projectRoot, hostWorkspacesPath);
+            hostCharacterPath = path.join(resolvedHostWorkspaces, agentId, 'character.json');
+        }
+
+        // Verify image exists locally or attempt to pull
+        try {
+            await docker.inspectImage(ELIZA_IMAGE_BASE);
+        } catch (e: any) {
+            if (e.status === 404) {
+                logger.info(`Image ${ELIZA_IMAGE_BASE} not found locally. Attempting to pull...`);
+                try {
+                    await docker.pullImage(ELIZA_IMAGE_BASE);
+                    logger.info(`Successfully pulled image ${ELIZA_IMAGE_BASE}`);
+                } catch (pullErr: any) {
+                    logger.error(`Failed to pull image ${ELIZA_IMAGE_BASE}: ${pullErr.message}`);
+                    throw pullErr;
+                }
+            } else {
+                throw e;
+            }
+        }
 
         await docker.createContainer({
             Image: ELIZA_IMAGE_BASE,
+            User: '1000:1000',
             name: containerName,
             Env: [`AGENT_ID=${agentId}`],
             HostConfig: {

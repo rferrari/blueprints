@@ -33,3 +33,4 @@ dist-ssr
 
 packages/worker/workspaces/*
 external/*
+workspaces/

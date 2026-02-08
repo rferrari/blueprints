@@ -769,6 +769,26 @@ function startMessageBus() {
         });
 }
 
+function startStateListener() {
+    logger.info('🛰️  Starting State Change Listener...');
+
+    supabase
+        .channel('agent_state_changes')
+        .on('postgres_changes', {
+            event: '*', // Listen to all changes (INSERT, UPDATE, DELETE)
+            schema: 'public',
+            table: 'agent_desired_state'
+        }, () => {
+            logger.info('🔄 State change detected, triggering reconciliation...');
+            reconcile();
+        })
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                logger.info('✅ State Listener: Subscribed to desired state changes');
+            }
+        });
+}
+
 // Run the reconciler every 10 seconds
 async function startReconciler() {
     await reconcile();
@@ -777,3 +797,4 @@ async function startReconciler() {
 
 startReconciler();
 startMessageBus();
+startStateListener();

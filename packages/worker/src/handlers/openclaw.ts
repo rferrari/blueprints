@@ -123,7 +123,6 @@ export async function startOpenClawAgent(agentId: string, config: any) {
         }
 
         const env = [
-            `OPENCLAW_AGENT_ID=${agentId}`,
             `OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw`,
             `OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json`
         ];

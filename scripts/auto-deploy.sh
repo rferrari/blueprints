@@ -34,7 +34,19 @@ REMOTE=$(git rev-parse origin/main)
 
 if [ "$LOCAL" != "$REMOTE" ]; then
     log "Updates detected. Pulling changes..."
-    
+
+    # Capture details for recording
+    COMMIT_HASH=$(git rev-parse HEAD)
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    MESSAGE=$(git log -1 --pretty=%B)
+
+    # Record Start
+    # We use bun to run the ts script. Ensure bun is in path or use absolute path if needed.
+    # Assuming running as root via systemd, bun might need full path or environment setup.
+    # For now relying on PATH being set or adding it.
+    DEPLOYMENT_ID=$(bun run scripts/record-deployment.ts start "$COMMIT_HASH" "$BRANCH" "$MESSAGE")
+    log "Deployment ID: $DEPLOYMENT_ID"
+
     # Pull changes
     if git pull origin main; then
         log "Code updated successfully."
@@ -43,11 +55,14 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         # Rebuild only the specified service
         if docker compose up "$SERVICE_NAME" --build -d; then
             log "Deployment successful!"
+            bun run scripts/record-deployment.ts finish "$DEPLOYMENT_ID" "success"
         else
             log "Error: Docker compose failed."
+            bun run scripts/record-deployment.ts finish "$DEPLOYMENT_ID" "failed"
         fi
     else
         log "Error: Git pull failed."
+        bun run scripts/record-deployment.ts finish "$DEPLOYMENT_ID" "failed"
     fi
 else
     # Uncomment to log "no changes" checks, otherwise keep silent to avoid log spam

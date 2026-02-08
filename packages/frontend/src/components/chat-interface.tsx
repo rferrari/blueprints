@@ -165,7 +165,6 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
 
         let userMsgContent = input.trim();
 
-        // Auto-prefix for terminal mode if not already prefixed
         if (isTerminalMode && !userMsgContent.startsWith('/terminal ')) {
             userMsgContent = `/terminal ${userMsgContent}`;
         }
@@ -198,7 +197,7 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
         const helpMsg: ChatMessage = {
             id: helpId,
             sender: 'agent',
-            content: `🖥️ Terminal Mode Help\n\nWhen Active: Every message you send is executed as a shell command inside the agent's container.\n\nCommands:\n• ls - List files\n• pwd - Current directory\n• env - Show environment\n• exit - Switch back to chat\n\nUse the menu to toggle modes.`,
+            content: `🖥️ Terminal Guide\n\n**Dual Routing System**:\n1. **Terminal Mode**: Every message is automatically executed as a shell command.\n2. **Chat Mode**: You can still run commands by prefixing them with \`/terminal \`.\n\n**Quick Commands**:\n• \`ls -la\` (List files)\n• \`pwd\` (Print working directory)\n• \`whoami\` (Check user context)\n\nSwitch modes anytime using the ⋮ menu.`,
             created_at: new Date().toISOString()
         };
         setMessages(prev => [...prev, helpMsg]);
@@ -315,8 +314,8 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
                             <div className={`p-4 rounded-[1.5rem] text-sm font-medium leading-relaxed ${msg.sender === 'user'
                                 ? 'bg-indigo-500 text-white rounded-tr-none shadow-xl shadow-indigo-500/10'
                                 : 'bg-white/5 border border-white/5 text-slate-200 rounded-tl-none'
-                                }`}>
-                                {msg.content}
+                                } whitespace-pre-wrap`}>
+                                {msg.content.startsWith('/terminal ') ? msg.content.replace('/terminal ', '') : msg.content}
                             </div>
                         </div>
                     </div>
@@ -366,6 +365,6 @@ export default function ChatInterface({ agentId }: { agentId: string }) {
             {/* Background Decorations */}
             <div className="absolute -bottom-20 -left-20 size-60 bg-primary/5 rounded-full blur-[80px] pointer-events-none" />
             <div className="absolute -top-20 -right-20 size-60 bg-indigo-500/5 rounded-full blur-[80px] pointer-events-none" />
-        </div>
+        </div >
     );
 }

@@ -3,75 +3,13 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import { cryptoUtils } from './lib/crypto';
-
-// Simple Logger with levels
-const LogLevels = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
-const CURRENT_LOG_LEVEL = (process.env.LOG_LEVEL?.toUpperCase() as keyof typeof LogLevels) || 'INFO';
-
-const logger = {
-    _log: (level: string, icon: string, ...args: any[]) => {
-        const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        console.log(`${time} ${icon} ${level.padEnd(5)} |`, ...args);
-    },
-    debug: (...args: any[]) => (LogLevels as any)[CURRENT_LOG_LEVEL] <= LogLevels.DEBUG && logger._log('DEBUG', '⚙️', ...args),
-    info: (...args: any[]) => (LogLevels as any)[CURRENT_LOG_LEVEL] <= LogLevels.INFO && logger._log('INFO', '🚀', ...args),
-    warn: (...args: any[]) => (LogLevels as any)[CURRENT_LOG_LEVEL] <= LogLevels.WARN && logger._log('WARN', '⚠️', ...args),
-    error: (...args: any[]) => (LogLevels as any)[CURRENT_LOG_LEVEL] <= LogLevels.ERROR && logger._log('ERROR', '🛑', ...args),
-};
-
-import http from 'node:http';
-
-const docker = {
-    async _request(method: string, path: string, body?: any): Promise<any> {
-        return new Promise((resolve, reject) => {
-            const options = {
-                socketPath: '/var/run/docker.sock',
-                path: `/v1.44${path}`,
-                method,
-                headers: body ? { 'Content-Type': 'application/json' } : {}
-            };
-
-            const req = http.request(options, (res) => {
-                let data = '';
-                res.on('data', (chunk) => data += chunk);
-                res.on('end', () => {
-                    if (res.statusCode && res.statusCode >= 400) {
-                        const err = new Error(`Docker API Error (${res.statusCode}): ${data}`);
-                        (err as any).status = res.statusCode;
-                        (err as any).data = data;
-                        return reject(err);
-                    }
-                    try {
-                        resolve(data ? JSON.parse(data) : {});
-                    } catch (e) {
-                        resolve(data);
-                    }
-                });
-            });
-
-            req.on('error', (err) => reject(err));
-            if (body) req.write(JSON.stringify(body));
-            req.end();
-        });
-    },
-    async listContainers() {
-        return this._request('GET', '/containers/json?all=true');
-    },
-    async getContainer(name: string) {
-        return {
-            inspect: () => this._request('GET', `/containers/${name}/json`),
-            start: () => this._request('POST', `/containers/${name}/start`),
-            stop: () => this._request('POST', `/containers/${name}/stop`),
-            remove: () => this._request('DELETE', `/containers/${name}?v=true&force=true`)
-        };
-    },
-    async createContainer(config: any) {
-        const { name, ...rest } = config;
-        const data = await this._request('POST', `/containers/create?name=${name}`, rest);
-        return this.getContainer(data.Id || data.Id);
-    }
-};
+import { logger } from './lib/logger';
+import { docker } from './lib/docker';
+import { startMessageBus } from './message-bus';
+import { startOpenClawAgent, stopOpenClawAgent } from './handlers/openclaw';
+import { startElizaAgent, stopElizaAgent } from './handlers/eliza';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -83,13 +21,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// Track consecutive failures to implement a retry limit
-const failureCounts = new Map<string, number>();
-const MAX_RETRIES = 3;
-
 let isReconciling = false;
-
-// Track applied config hashes to detect changes
 const configHashes = new Map<string, string>();
 
 function getConfigHash(config: any): string {
@@ -98,67 +30,11 @@ function getConfigHash(config: any): string {
     return crypto.createHash('md5').update(str).digest('hex');
 }
 
-import crypto from 'node:crypto';
-
-// --- Configuration Sanitization ---
-
-function sanitizeConfig(config: any): any {
-    if (!config) return config;
-    const sanitized = JSON.parse(JSON.stringify(config)); // Deep clone
-
-    // 1. Fix Venice model prefixing and API types in providers
-    if (sanitized.models?.providers?.venice) {
-        const venice = sanitized.models.providers.venice;
-
-        // Ensure Venice uses openai-completions
-        if (venice.api === 'openai-responses') {
-            venice.api = 'openai-completions';
-        }
-
-        // Fix double prefixing in models array
-        if (Array.isArray(venice.models)) {
-            venice.models = venice.models.map((m: any) => {
-                if (typeof m.id === 'string' && m.id.startsWith('venice/')) {
-                    return { ...m, id: m.id.replace('venice/', '') };
-                }
-                return m;
-            });
-        }
-    }
-
-    // 2. Fix defaults double prefixing (venice/venice/...)
-    if (sanitized.agents?.defaults?.model?.primary) {
-        const primary = sanitized.agents.defaults.model.primary;
-        if (typeof primary === 'string' && primary.startsWith('venice/venice/')) {
-            sanitized.agents.defaults.model.primary = primary.replace('venice/venice/', 'venice/');
-        }
-    }
-
-    if (sanitized.agents?.defaults?.models) {
-        const models = sanitized.agents.defaults.models;
-        const newModels: any = {};
-        for (const [key, value] of Object.entries(models)) {
-            let newKey = key;
-            if (key.startsWith('venice/venice/')) {
-                newKey = key.replace('venice/venice/', 'venice/');
-            }
-            newModels[newKey] = value;
-        }
-        sanitized.agents.defaults.models = newModels;
-    }
-
-    return sanitized;
-}
-
 async function reconcile() {
     if (isReconciling) return;
     isReconciling = true;
 
     try {
-        // Move to debug to avoid log spam every 10s
-        // logger.debug('--- Reconciling Agents ---');
-
-        // 1. Fetch all agents with their states
         const { data: agents, error } = await supabase
             .from('agents')
             .select(`
@@ -183,73 +59,46 @@ async function reconcile() {
         }
 
         const now = new Date();
-
         const dockerContainers = await docker.listContainers();
         const runningContainers = new Set(dockerContainers
             .filter((c: any) => (c.State || '').toLowerCase() === 'running')
             .map((c: any) => c.Names[0].replace('/', ''))
         );
 
-        // 2. Process each agent
         for (const agent of agents) {
             const desired = agent.agent_desired_state;
             const actual = agent.agent_actual_state;
 
             if (!desired || !actual) continue;
 
-            // Standard Reconcile
             let isRunning = actual.status === 'running';
             const shouldBeRunning = desired.enabled;
 
-            // Verify Docker state for OpenClaw agents to ensure the DB reflects reality
             if (agent.framework === 'openclaw') {
                 const containerName = `openclaw-${agent.id}`;
                 const containerIsReallyRunning = runningContainers.has(containerName);
 
                 if (isRunning && !containerIsReallyRunning) {
                     logger.warn(`Agent ${agent.id} marked as running in DB but container is missing or stopped. Syncing DB...`);
-
-                    const { error: syncError } = await supabase.from('agent_actual_state').upsert({
+                    await supabase.from('agent_actual_state').upsert({
                         agent_id: agent.id,
                         status: 'stopped',
                         endpoint_url: null,
                         last_sync: new Date().toISOString()
                     });
-
-                    if (syncError) {
-                        logger.error(`Failed to sync stopped state for agent ${agent.id}:`, syncError.message, syncError.code);
-                    } else {
-                        isRunning = false;
-                    }
+                    isRunning = false;
                 }
             }
 
-            // Check Purge Logic
             if (desired.purge_at) {
                 const purgeDate = new Date(desired.purge_at);
-
-                // Stage 1: Absolute Purge (Time to delete)
                 if (now >= purgeDate) {
-                    const framework = agent.framework === 'openclaw' ? 'OpenClaw' : 'Eliza';
-                    logger.info(`[TERMINATE] Executing final deletion for ${framework} agent ${agent.id}...`);
-                    if (agent.framework === 'openclaw') {
-                        await stopOpenClawAgent(agent.id);
-                    } else {
-                        await stopElizaAgent(agent.id);
-                    }
+                    logger.info(`[TERMINATE] Executing final deletion for ${agent.framework} agent ${agent.id}...`);
+                    if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
+                    else await stopElizaAgent(agent.id);
                     await supabase.from('agents').delete().eq('id', agent.id);
                     continue;
                 }
-
-                // Stage 2: Stopping Sequence (Time to stop)
-                // The original logic for stopDate was removed as per the patch.
-                // If it needs to be re-added, it should be done explicitly.
-                // const stopDate = new Date(purgeDate.getTime() - (24 * 60 * 60 * 1000));
-                // if (now >= stopDate && desired.enabled) {
-                //     console.log(`[TERMINATE] Entering decommissioning for agent ${agent.id}. Disabling...`);
-                //     await supabase.from('agent_desired_state').update({ enabled: false }).eq('agent_id', agent.id);
-                //     desired.enabled = false; // Update local state for subsequent logic
-                // }
             }
 
             const currentHash = getConfigHash(desired.config);
@@ -259,27 +108,17 @@ async function reconcile() {
             if (shouldBeRunning && (!isRunning || configChanged)) {
                 if (configChanged && isRunning) {
                     logger.info(`Configuration changed for agent ${agent.id}. Restarting...`);
-                    if (agent.framework === 'openclaw') {
-                        await stopOpenClawAgent(agent.id);
-                    } else {
-                        await stopElizaAgent(agent.id);
-                    }
+                    if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
+                    else await stopElizaAgent(agent.id);
                 }
-                if (agent.framework === 'openclaw') {
-                    await startOpenClawAgent(agent.id, desired.config);
-                } else {
-                    await startElizaAgent(agent.id, desired.config);
-                }
+                if (agent.framework === 'openclaw') await startOpenClawAgent(agent.id, desired.config);
+                else await startElizaAgent(agent.id, desired.config);
                 configHashes.set(agent.id, currentHash);
             } else if (!shouldBeRunning && isRunning) {
-                if (agent.framework === 'openclaw') {
-                    await stopOpenClawAgent(agent.id);
-                } else {
-                    await stopElizaAgent(agent.id);
-                }
+                if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
+                else await stopElizaAgent(agent.id);
                 configHashes.delete(agent.id);
             } else if (shouldBeRunning && isRunning && !lastHash) {
-                // Initialize hash for already running agent
                 configHashes.set(agent.id, currentHash);
             }
         }
@@ -288,512 +127,31 @@ async function reconcile() {
     }
 }
 
-// --- Eliza Framework Logic ---
-
-async function startElizaAgent(agentId: string, config: any) {
-    logger.info(`Starting Eliza agent ${agentId}...`);
-
-    const { data: runtime } = await supabase.from('runtimes').select('*').limit(1).single();
-
-    if (!runtime) {
-        logger.error('No runtime available to start Eliza agent');
-        return;
-    }
-
-    try {
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'starting',
-            runtime_id: runtime.id
-        });
-
-        await axios.post(`${runtime.eliza_api_url}/agents`, {
-            agent: { ...config, id: agentId }
-        }, {
-            headers: { 'Authorization': `Bearer ${runtime.auth_token}` }
-        });
-
-        await axios.post(`${runtime.eliza_api_url}/agents/${agentId}/start`, { config }, {
-            headers: { 'Authorization': `Bearer ${runtime.auth_token}` }
-        });
-
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'running',
-            runtime_id: runtime.id,
-            last_sync: new Date().toISOString()
-        });
-
-        failureCounts.delete(agentId); // Success! Reset counter
-        logger.info(`Eliza agent ${agentId} started successfully on runtime ${runtime.id}`);
-    } catch (err: any) {
-        if (err.status || (err.isAxiosError && err.response)) {
-            const status = err.status || err.response?.status;
-            const data = err.data || err.response?.data;
-            logger.error(`Runtime API Error (${status}):`, typeof data === 'object' ? JSON.stringify(data, null, 2) : data);
-        }
-        logger.error(`Failed to start Eliza agent ${agentId}:`, err.message);
-
-        const currentFailures = (failureCounts.get(agentId) || 0) + 1;
-        failureCounts.set(agentId, currentFailures);
-
-        if (currentFailures >= MAX_RETRIES) {
-            logger.error(`Agent ${agentId} failed ${currentFailures} times. Disabling...`);
-            await supabase.from('agent_desired_state').update({ enabled: false }).eq('agent_id', agentId);
-            failureCounts.delete(agentId);
-        }
-
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'error',
-            error_message: err.message
-        });
-    }
-}
-
-async function stopElizaAgent(agentId: string) {
-    logger.info(`Stopping Eliza agent ${agentId}...`);
-
-    const { data: actual } = await supabase
-        .from('agent_actual_state')
-        .select('*')
-        .eq('agent_id', agentId)
-        .single();
-
-    if (!actual || !actual.runtime_id) return;
-
-    const { data: runtime } = await supabase
-        .from('runtimes')
-        .select('*')
-        .eq('id', actual.runtime_id)
-        .single();
-
-    if (!runtime) return;
-
-    try {
-        await axios.post(`${runtime.eliza_api_url}/agents/${agentId}/stop`, {}, {
-            headers: { 'Authorization': `Bearer ${runtime.auth_token}` }
-        });
-
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'stopped',
-            runtime_id: null,
-            last_sync: new Date().toISOString()
-        });
-
-        logger.info(`Eliza agent ${agentId} stopped successfully.`);
-    } catch (err: any) {
-        logger.error(`Failed to stop Eliza agent ${agentId}:`, err.message);
-    }
-}
-
-// --- OpenClaw Framework Logic ---
-
-async function startOpenClawAgent(agentId: string, config: any) {
-    logger.info(`Starting OpenClaw agent ${agentId}...`);
-
-    try {
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'starting'
-        });
-
-        const containerName = `openclaw-${agentId}`;
-        const container = await docker.getContainer(containerName);
-
-        // Deterministic port mapping: 19000 + (hash of agentId % 1000)
-        const hash = agentId.split('-').reduce((acc, part) => acc + parseInt(part, 16), 0);
-        const hostPort = 19000 + (hash % 1000);
-
-        // Use VPS_PUBLIC_IP if set, otherwise fallback to 127.0.0.1 (IPv4) for standalone/dev
-        // We avoid 'localhost' because node/bun often resolve it to ::1 (IPv6) which Docker may not bind to
-        const vpsIp = process.env.VPS_PUBLIC_IP || '127.0.0.1';
-        const endpointUrl = `http://${vpsIp}:${hostPort}`;
-
-        try {
-            const info = await container.inspect();
-            // Docker's 'Running' boolean can be true during 'restarting', so we check 'Status' specifically.
-            if (info.State.Status === 'running') {
-                logger.info(`Container ${containerName} is already running. Syncing DB state.`);
-
-                // Ensure workspace and config file exist even if container is running
-                const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
-                const openclawDir = path.join(workspacePath, '.openclaw');
-                if (!fs.existsSync(openclawDir)) {
-                    fs.mkdirSync(openclawDir, { recursive: true });
-                }
-                const configPath = path.join(openclawDir, 'openclaw.json');
-                if (!fs.existsSync(configPath)) {
-                    logger.warn(`Config file ${configPath} missing for running container. Re-creating...`);
-                    const finalConfig = cryptoUtils.decryptConfig(config);
-                    fs.writeFileSync(configPath, JSON.stringify(finalConfig, null, 2));
-                }
-
-                const { error: syncError } = await supabase.from('agent_actual_state').upsert({
-                    agent_id: agentId,
-                    status: 'running',
-                    endpoint_url: endpointUrl,
-                    last_sync: new Date().toISOString()
-                });
-                if (syncError) throw syncError;
-                failureCounts.delete(agentId);
-                return;
-            }
-            logger.info(`Container ${containerName} is in state "${info.State.Status}". Removing and recreating...`);
-            await container.remove();
-        } catch (e: any) {
-            // Container doesn't exist, proceed to create
-        }
-
-        // Setup workspace directory with .openclaw subdirectory
-        // Setup workspace directory with .openclaw subdirectory
-        // This path is internal to the worker container/process
-        const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
-        const openclawDir = path.join(workspacePath, '.openclaw');
-        if (!fs.existsSync(openclawDir)) {
-            fs.mkdirSync(openclawDir, { recursive: true });
-        }
-
-        // Determine the path to be used for the Docker bind mount (what the Docker Daemon sees on the HOST)
-        // If HOST_WORKSPACES_PATH is set (e.g. /root/project/workspaces), use that.
-        // Otherwise, fall back to the resolved path (which works if worker is not in docker, or paths align).
-        const hostWorkspacesPath = process.env.HOST_WORKSPACES_PATH;
-        let hostOpenclawDir = openclawDir;
-
-        if (hostWorkspacesPath) {
-            hostOpenclawDir = path.join(hostWorkspacesPath, agentId, '.openclaw');
-            logger.debug(`Using HOST_WORKSPACES_PATH: Mapping ${hostOpenclawDir} -> /home/node/.openclaw`);
-        }
-
-        // Write config to .openclaw subdirectory
-        const configPath = path.join(openclawDir, 'openclaw.json');
-
-        // Ensure gateway mode is set to local to bypass onboarding
-        const configWithDefaults = {
-            ...config,
-            gateway: {
-                ...(config.gateway || {}),
-                mode: 'local',
-                bind: 'lan'
-            }
-        };
-
-        const decrypted = cryptoUtils.decryptConfig(configWithDefaults);
-        const finalConfig = sanitizeConfig(decrypted);
-
-        // Self-Healing: If sanitization changed the config, persist it back to the DB
-        // We compare the decrypted versions but must encrypt before saving
-        if (JSON.stringify(decrypted) !== JSON.stringify(finalConfig)) {
-            logger.info(`Self-Healing: Configuration mismatch detected for agent ${agentId}. Updating database with sanitized config.`);
-            const encryptedConfig = cryptoUtils.encryptConfig(finalConfig);
-
-            // We update the agent_desired_state so the next reconciliation sees the clean version
-            const { error: patchError } = await supabase
-                .from('agent_desired_state')
-                .update({ config: encryptedConfig })
-                .eq('agent_id', agentId);
-
-            if (patchError) {
-                logger.error(`Self-Healing: Failed to persist sanitized config for ${agentId}:`, patchError.message);
-            }
-        }
-
-        logger.info(`Writing OpenClaw config to ${configPath}...`);
-        fs.writeFileSync(configPath, JSON.stringify(finalConfig, null, 2));
-
-        // Setup environment variables
-        const env = [
-            `OPENCLAW_AGENT_ID=${agentId}`,
-            `OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw`,
-            `OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json`
-        ];
-
-        // Ensure gateway token is set for worker-agent communication if provided in config
-        if (finalConfig.gateway?.auth?.token) {
-            env.push(`OPENCLAW_GATEWAY_TOKEN=${finalConfig.gateway.auth.token}`);
-        }
-
-        logger.debug(`Creating container ${containerName} with image openclaw:local (Port ${hostPort})...`);
-
-        // Securely run as the same user as the worker to avoid permission issues without 777
-        const uid = process.getuid ? process.getuid() : 1000;
-        const gid = process.getgid ? process.getgid() : 1000;
-
-        const newContainer = await docker.createContainer({
-            Image: 'openclaw:local',
-            User: `${uid}:${gid}`,
-            name: containerName,
-            Env: env,
-            Cmd: ['node', 'dist/index.js', 'gateway', '--bind', 'lan'],
-            ExposedPorts: {
-                '18789/tcp': {}
-            },
-            HostConfig: {
-                Binds: [
-                    `${hostOpenclawDir}:/home/node/.openclaw`
-                ],
-                PortBindings: {
-                    '18789/tcp': [{ HostPort: hostPort.toString() }]
-                },
-                RestartPolicy: { Name: 'unless-stopped' }
-            },
-            NetworkingConfig: {
-                EndpointsConfig: {
-                    [process.env.DOCKER_NETWORK_NAME || 'blueprints-network']: {}
-                }
-            }
-        });
-
-        await newContainer.start();
-
-        const { error: upsertError } = await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'running',
-            endpoint_url: endpointUrl,
-            last_sync: new Date().toISOString()
-        });
-
-        if (upsertError) throw upsertError;
-
-        failureCounts.delete(agentId); // Success! Reset counter
-        logger.info(`OpenClaw agent ${agentId} started via Docker successfully.`);
-    } catch (err: any) {
-        if (err.status || (err.isAxiosError && err.response)) {
-            const status = err.status || err.response?.status;
-            const data = err.data || err.response?.data;
-            logger.error(`Docker API Error (${status}):`, typeof data === 'object' ? JSON.stringify(data, null, 2) : data);
-        }
-        logger.error(`Failed to start OpenClaw agent ${agentId}:`, err.message);
-
-        const currentFailures = (failureCounts.get(agentId) || 0) + 1;
-        failureCounts.set(agentId, currentFailures);
-
-        if (currentFailures >= MAX_RETRIES) {
-            logger.error(`Agent ${agentId} failed ${currentFailures} times. Disabling...`);
-            await supabase.from('agent_desired_state').update({ enabled: false }).eq('agent_id', agentId);
-            failureCounts.delete(agentId);
-        }
-
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'error',
-            error_message: err.message
-        });
-    }
-}
-
-async function stopOpenClawAgent(agentId: string) {
-    logger.info(`Stopping OpenClaw agent ${agentId}...`);
-
-    const containerName = `openclaw-${agentId}`;
-    const container = await docker.getContainer(containerName);
-
-    try {
-        await container.stop();
-        await container.remove();
-
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'stopped',
-            runtime_id: null,
-            last_sync: new Date().toISOString()
-        });
-
-        logger.info(`OpenClaw agent ${agentId} stopped and container removed.`);
-    } catch (err: any) {
-        logger.error(`Failed to stop OpenClaw agent ${agentId}:`, err.message);
-    }
-}
-
-// --- Message Bus Implementation ---
-
-
-
-const isDocker = fs.existsSync('/.dockerenv');
-
-async function handleUserMessage(payload: any) {
-    const { id, agent_id, content, user_id } = payload;
-    logger.info(`Message Bus: Received user message for agent ${agent_id}`);
-
-    try {
-        // 1. Get agent's actual state (for local endpoint)
-        const { data: actual } = await supabase
-            .from('agent_actual_state')
-            .select('endpoint_url')
-            .eq('agent_id', agent_id)
-            .single();
-
-        // 2. Get agent's desired state (for framework and config)
-        const { data: agent } = await supabase
-            .from('agents')
-            .select('framework')
-            .eq('id', agent_id)
-            .single();
-
-        if (!actual?.endpoint_url || !agent) {
-            logger.warn(`Message Bus: Agent ${agent_id} not ready or not found.`);
-            return;
-        }
-
-        let agentResponseContent = `Response from ${agent.framework} agent.`;
-
-        if (agent.framework === 'openclaw') {
-            const { data: desired } = await supabase
-                .from('agent_desired_state')
-                .select('config')
-                .eq('agent_id', agent_id)
-                .single();
-
-            const config = cryptoUtils.decryptConfig((desired?.config as any) || {});
-
-
-            const token = config.gateway?.auth?.token;
-
-            // Determine correct Agent URL
-            // If running in Docker (VPS/Production), we MUST use the internal container hostname (blueprints-network).
-            // If running locally (Host), we use the endpoint_url (localhost:port) from the DB.
-            let agentUrl = actual.endpoint_url || `http://openclaw-${agent_id}:18789`;
-
-            if (isDocker) {
-                agentUrl = `http://openclaw-${agent_id}:18789`;
-                logger.debug(`Message Bus: Running in Docker, switching to internal URL: ${agentUrl}`);
-            }
-
-            const maskToken = (t: string) => t ? `${t.substring(0, 4)}...${t.substring(t.length - 4)}` : 'null';
-            logger.info(`Message Bus: Calling agent at ${agentUrl} (Token: ${maskToken(token)})`);
-
-            let attempts = 0;
-            const maxAttempts = 5;
-            let success = false;
-
-            while (attempts < maxAttempts && !success) {
-                attempts++;
-                try {
-                    const res = await axios.post(`${agentUrl}/v1/chat/completions`, {
-                        model: 'openclaw',
-                        messages: [{ role: 'user', content }]
-                    }, {
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`,
-                            'x-openclaw-agent-id': agent_id,
-                            'Connection': 'close'
-                        },
-                        timeout: 120000
-                    });
-
-                    const result = res.data;
-                    agentResponseContent = result.choices?.[0]?.message?.content || agentResponseContent;
-
-                    // Detect internal OpenClaw provider timeout (returns 200 OK but "No reply from agent.")
-                    if (agentResponseContent === 'No reply from agent.') {
-                        agentResponseContent = `[PROVIDER TIMEOUT]: ${agentResponseContent}`;
-                        logger.error(`Message Bus: [PROVIDER TIMEOUT] for agent ${agent_id}`);
-                    }
-
-                    success = true;
-                } catch (err: any) {
-                    const isConnRefused = err.code === 'ECONNREFUSED' || err.message?.includes('Unable to connect');
-                    const status = err.response?.status;
-                    const responseData = err.response?.data;
-                    const detailedError = responseData ? (typeof responseData === 'object' ? JSON.stringify(responseData) : responseData) : err.message;
-
-                    if (isConnRefused) {
-                        if (attempts < maxAttempts) {
-                            logger.warn(`Message Bus: [TRANSPORT ERROR] Connection refused (Agent starting?). Retrying attempt ${attempts}/${maxAttempts} in 1s...`);
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                        } else {
-                            logger.error(`Message Bus: [TRANSPORT ERROR] Failed to connect to agent at ${agentUrl} after ${attempts} attempts.`);
-                            agentResponseContent = `Error: Agent unreachable at ${agentUrl}`;
-                            break;
-                        }
-                    } else {
-                        // Classify Gateway vs Provider vs General
-                        let label = '[AGENT ERROR]';
-                        if (status === 403 || status === 401) {
-                            label = '[AGENT GATEWAY ERROR]';
-                        } else if (detailedError.toLowerCase().includes('model') || detailedError.toLowerCase().includes('provider')) {
-                            label = '[PROVIDER ERROR]';
-                        }
-
-                        logger.error(`Message Bus: ${label} (Status: ${status || err.code}) on attempt ${attempts}. Details: ${detailedError}`);
-                        agentResponseContent = `${label}: ${detailedError}`;
-                        break; // Exit loop on non-connection errors
-                    }
-                }
-            }
-        } else {
-            // Placeholder for other frameworks (Eliza, etc.)
-            agentResponseContent = `Protocol Note: ${agent.framework} messaging bridge pending.`;
-        }
-
-        // 3. Post response back to database
-        const { error: postError } = await supabase
-            .from('agent_conversations')
-            .insert([{
-                agent_id,
-                user_id,
-                content: agentResponseContent,
-                sender: 'agent'
-            }]);
-
-        if (postError) {
-            logger.error(`Message Bus: Failed to post agent response:`, postError.message);
-        } else {
-            logger.info(`Message Bus: Agent response posted for agent ${agent_id}`);
-        }
-
-    } catch (err: any) {
-        logger.error(`Message Bus: Error processing message:`, err.message);
-    }
-}
-
-function startMessageBus() {
-    logger.info('🛰️  Starting Message Bus Listener...');
-
-    supabase
-        .channel('agent_conversations_changes')
-        .on('postgres_changes', {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'agent_conversations',
-            filter: 'sender=eq.user'
-        }, (payload) => {
-            handleUserMessage(payload.new);
-        })
-        .subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-                logger.info('✅ Message Bus: Subscribed to conversations');
-            }
-        });
-}
-
 function startStateListener() {
     logger.info('🛰️  Starting State Change Listener...');
-
     supabase
         .channel('agent_state_changes')
         .on('postgres_changes', {
-            event: '*', // Listen to all changes (INSERT, UPDATE, DELETE)
+            event: '*',
             schema: 'public',
             table: 'agent_desired_state'
         }, () => {
             logger.info('🔄 State change detected, triggering reconciliation...');
             reconcile();
         })
-        .subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-                logger.info('✅ State Listener: Subscribed to desired state changes');
-            }
-        });
+        .subscribe();
 }
 
-// Run the reconciler every 10 seconds
 async function startReconciler() {
     await reconcile();
     setTimeout(startReconciler, 10000);
 }
+
+// Global process handling for clean exits
+process.on('SIGTERM', () => {
+    logger.info('SIGTERM received. Cleaning up...');
+    process.exit(0);
+});
 
 startReconciler();
 startMessageBus();

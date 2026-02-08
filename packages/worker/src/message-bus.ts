@@ -8,25 +8,40 @@ import { runTerminalCommand } from './handlers/openclaw';
 const isDocker = fs.existsSync('/.dockerenv');
 
 export async function handleUserMessage(payload: any) {
-    const { id, agent_id, content, user_id } = payload;
-    logger.info(`Message Bus: Received user message for agent ${agent_id}`);
+    const { id, agent_id, content: rawContent, user_id } = payload;
+    const content = (rawContent || '').trim();
+
+    logger.info(`Message Bus: [${id}] Processing message for agent ${agent_id}: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`);
 
     try {
         // --- Terminal Tool Logic ---
-        if (content.startsWith('/terminal ')) {
-            const command = content.replace('/terminal ', '');
-            logger.info(`Message Bus: Executing terminal command for agent ${agent_id}: ${command}`);
+        if (content === '/terminal' || content.startsWith('/terminal ')) {
+            const command = content === '/terminal' ? 'help' : content.replace('/terminal ', '').trim();
+
+            logger.info(`Message Bus: [${id}] Terminal command detected: "${command}"`);
+
+            if (command === 'help' || !command) {
+                await supabase.from('agent_conversations').insert([{
+                    agent_id,
+                    user_id,
+                    content: `🖥️ Terminal Command Center\n\nCommands prefixed with \`/terminal\` are executed directly inside the agent container.\n\n💡 **Tip**: You can run terminal commands even in **Chat Mode** by starting your message with \`/terminal \`.\n\n**Examples**:\n• \`/terminal ls -la\`\n• \`/terminal whoami\`\n• \`/terminal pwd\``,
+                    sender: 'agent'
+                }]);
+                return;
+            }
 
             const output = await runTerminalCommand(agent_id, command);
 
             await supabase.from('agent_conversations').insert([{
                 agent_id,
                 user_id,
-                content: `> ${command}\n\n${output}`,
+                content: `\`\`\`bash\n$ ${command}\n\n${output}\n\`\`\``,
                 sender: 'agent'
             }]);
             return;
         }
+
+        logger.info(`Message Bus: [${id}] Standard chat routing for agent ${agent_id}`);
 
         // --- Standard Chat Logic ---
         // 1. Get agent's actual state (for local endpoint)

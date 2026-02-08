@@ -5,6 +5,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 declare module 'fastify' {
     interface FastifyInstance {
         supabase: SupabaseClient;
+        adminGuard: (request: any, reply: any) => Promise<void>;
+        superAdminGuard: (request: any, reply: any) => Promise<void>;
     }
 }
 

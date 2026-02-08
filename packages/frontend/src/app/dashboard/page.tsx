@@ -12,6 +12,7 @@ import SettingsView from '@/components/settings-view';
 
 export default function DashboardPage() {
     const [user, setUser] = useState<any>(null);
+    const [role, setRole] = useState<string | null>(null);
     const [view, setView] = useState<'projects' | 'marketplace' | 'settings'>('projects');
     const [selectedProject, setSelectedProject] = useState<string | null>(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Default closed for mobile
@@ -47,6 +48,15 @@ export default function DashboardPage() {
                 return;
             }
             setUser(session.user);
+
+            // Fetch profile/role
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', session.user.id)
+                .single();
+
+            setRole(profile?.role || 'user');
             fetchProjects(session.access_token);
         };
         checkUser();
@@ -209,6 +219,19 @@ export default function DashboardPage() {
                         </div>
                         <NavItem icon={LayoutDashboard} label="Dashboard" id="projects" />
                         <NavItem icon={ShoppingBag} label="Blueprints" id="marketplace" />
+
+                        {(role === 'admin_read' || role === 'super_admin') && (
+                            <Link
+                                href="/admin"
+                                className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-300 group relative overflow-hidden text-muted-foreground hover:text-white hover:bg-primary/10 border border-transparent hover:border-primary/20"
+                            >
+                                <div className="p-2 rounded-xl transition-colors group-hover:bg-primary/20">
+                                    <Shield size={20} className="text-primary" />
+                                </div>
+                                <span className="font-bold tracking-tight text-sm">Admin Console</span>
+                                <ChevronRight size={14} className="ml-auto transition-transform duration-300 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0" />
+                            </Link>
+                        )}
 
                         <div className="px-4 pt-8 mb-4">
                             <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">Infrastructure</span>

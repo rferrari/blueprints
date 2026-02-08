@@ -4,8 +4,10 @@ import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import supabasePlugin from './plugins/supabase';
 import authPlugin from './plugins/auth';
+import adminPlugin from './plugins/admin';
 import projectRoutes from './routes/projects';
 import agentRoutes from './routes/agents';
+import adminRoutes from './routes/admin';
 
 const fastify = Fastify({
     disableRequestLogging: true, // Reduce noise: standard incoming/completed logs moved to debug
@@ -85,8 +87,10 @@ fastify.get('/health', { logLevel: 'silent' }, async () => {
 // Protected routes group
 await fastify.register(async (authenticatedInstance) => {
     authenticatedInstance.register(authPlugin);
+    authenticatedInstance.register(adminPlugin);
     authenticatedInstance.register(projectRoutes, { prefix: '/projects' });
     authenticatedInstance.register(agentRoutes, { prefix: '/agents' });
+    authenticatedInstance.register(adminRoutes, { prefix: '/admin' });
 });
 
 const start = async () => {

@@ -28,6 +28,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
         // Channels
         channels: {
+            blueprints_chat: true, // Mandatory
             telegram: !!existingConfig.channels?.telegram?.enabled,
             discord: !!existingConfig.channels?.discord?.enabled,
             whatsapp: !!existingConfig.channels?.whatsapp?.enabled,
@@ -82,6 +83,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         try {
             // Channel Configuration
             const channelsConfig: any = {};
+            if (config.channels.blueprints_chat) channelsConfig.blueprints_chat = { enabled: true };
             if (config.channels.telegram && config.telegramToken) channelsConfig.telegram = { enabled: true, botToken: config.telegramToken };
             if (config.channels.discord && config.discordToken) channelsConfig.discord = { enabled: true, token: config.discordToken };
             if (config.channels.slack && config.slackToken) channelsConfig.slack = { enabled: true, token: config.slackToken };
@@ -368,10 +370,11 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step === 5 && (
                             <div className="space-y-8">
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Where should **{agent.name}** live? Select the communication channels you want to activate.
+                                    Where should **{agent.name}** live? The primary terminal is mandatory, but you can select additional neural channels.
                                 </p>
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                                     {[
+                                        { id: 'blueprints_chat', name: 'Blueprints Chat', icon: <MessageSquare size={20} className="text-primary" />, mandatory: true },
                                         { id: 'telegram', name: 'Telegram', icon: <Send size={20} className="text-blue-400" /> },
                                         { id: 'discord', name: 'Discord', icon: <Hash size={20} className="text-indigo-400" /> },
                                         { id: 'whatsapp', name: 'WhatsApp', icon: <MessageCircle size={20} className="text-green-400" /> },
@@ -379,20 +382,28 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                     ].map(c => (
                                         <button
                                             key={c.id}
-                                            onClick={() => setConfig({
-                                                ...config,
-                                                channels: { ...config.channels, [c.id]: !(config.channels as any)[c.id] }
-                                            })}
+                                            onClick={() => {
+                                                if (c.mandatory) return;
+                                                setConfig({
+                                                    ...config,
+                                                    channels: { ...config.channels, [c.id]: !(config.channels as any)[c.id] }
+                                                });
+                                            }}
+                                            disabled={c.mandatory}
                                             className={`p-6 rounded-2xl border transition-all flex flex-col items-center gap-4 text-center ${(config.channels as any)[c.id]
                                                 ? 'border-primary bg-primary/10 text-primary'
                                                 : 'border-white/5 bg-white/5 hover:bg-white/10 text-muted-foreground'
-                                                }`}
+                                                } ${c.mandatory ? 'cursor-default ring-2 ring-primary/20' : ''}`}
                                         >
                                             <div className="size-10 rounded-xl bg-white/10 flex items-center justify-center">
                                                 {c.icon}
                                             </div>
                                             <span className="font-bold text-xs uppercase tracking-widest">{c.name}</span>
-                                            {(config.channels as any)[c.id] && <div className="absolute top-4 right-4 text-primary"><Check size={14} /></div>}
+                                            {(config.channels as any)[c.id] && (
+                                                <div className="absolute top-4 right-4 text-primary">
+                                                    {c.mandatory ? <ShieldCheck size={14} /> : <Check size={14} />}
+                                                </div>
+                                            )}
                                         </button>
                                     ))}
                                 </div>
@@ -407,7 +418,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
                                 {Object.values(config.channels).every(v => !v) && (
                                     <div className="p-6 rounded-2xl border border-dashed border-white/10 text-center text-muted-foreground text-xs">
-                                        No channels selected. Agent will be headless.
+                                        Agent will be deployed with mandatory terminal only.
                                     </div>
                                 )}
 

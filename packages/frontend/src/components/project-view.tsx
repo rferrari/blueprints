@@ -16,6 +16,13 @@ interface Project {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+const COOL_NAMES = [
+    'Neon Ghost', 'Cypher Stalker', 'Glitch Weaver', 'Midnight Oracle',
+    'Quantum Spark', 'Aether Pulse', 'Void Runner', 'Binary Spirit',
+    'Silicon Reaper', 'Echo Prime', 'Nexus Core', 'Zenith Auditor',
+    'Solar Flare', 'Lunar Shadow', 'Onyx Sentinel', 'Cobalt Phantom'
+];
+
 export default function ProjectView({ projectId, onDataChange }: { projectId: string; onDataChange?: () => void }) {
     const { session } = useAuth();
     const [project, setProject] = useState<Project | null>(null);
@@ -28,6 +35,7 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
     const [chattingAgentId, setChattingAgentId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [lastCreatedAgentId, setLastCreatedAgentId] = useState<string | null>(null);
+    const [isLimitModalOpen, setIsLimitModalOpen] = useState(false);
 
     const [purgeModal, setPurgeModal] = useState<{ isOpen: boolean; agentId: string | null }>({
         isOpen: false,
@@ -267,8 +275,8 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
         );
     }
 
-    const limits: Record<string, number> = { 'free': 1, 'pro': 10, 'enterprise': 1000 };
-    const tierLimit = project ? limits[project.tier] || 1 : 1;
+    const limits: Record<string, number> = { 'free': 2, 'pro': 10, 'enterprise': 1000 };
+    const tierLimit = project ? limits[project.tier] || 2 : 2;
     const isAtLimit = agents.length >= tierLimit;
 
     return (
@@ -340,10 +348,17 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                if (!isAtLimit) setIsAdding(true);
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (!isAtLimit) {
+                                    const randomName = COOL_NAMES[Math.floor(Math.random() * COOL_NAMES.length)];
+                                    setNewAgentName(randomName);
+                                    setIsAdding(true);
+                                } else {
+                                    setIsLimitModalOpen(true);
+                                }
                             }}
-                            disabled={isAtLimit}
-                            className={`flex items-center gap-3 px-8 py-4 rounded-[1.5rem] font-black text-xs uppercase tracking-widest transition-all shadow-2xl relative overflow-hidden group/btn ${isAtLimit ? 'bg-muted/50 opacity-50 cursor-not-allowed text-muted-foreground border border-white/5' : 'bg-white text-black hover:bg-white active:scale-95'
+                            className={`flex items-center gap-3 px-8 py-4 rounded-[1.5rem] font-black text-xs uppercase tracking-widest transition-all shadow-2xl relative overflow-hidden group/btn ${isAtLimit ? 'bg-muted/50 text-muted-foreground border border-white/5 opacity-50' : 'bg-white text-black hover:bg-white active:scale-95'
                                 }`}
                         >
                             <Plus size={18} />
@@ -361,21 +376,6 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
                 </div>
             )}
 
-            {isAtLimit && !isAdding && (
-                <div className="p-8 rounded-[2.5rem] glass-card flex items-center gap-6 group relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:rotate-12 transition-transform">
-                        <Zap size={60} className="text-primary" />
-                    </div>
-                    <div className="size-14 rounded-2xl bg-primary/20 text-primary flex items-center justify-center">
-                        <ShieldCheck size={30} />
-                    </div>
-                    <div className="flex-1">
-                        <p className="text-xl font-bold tracking-tight mb-1">Architecture Limit Reached</p>
-                        <p className="text-sm font-medium text-muted-foreground">Upgrade to the **PRO** cluster to scale up to 10 autonomous agents.</p>
-                    </div>
-                    <button className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:opacity-90 active:scale-95 transition-all shadow-xl shadow-primary/20">Upgrade Now</button>
-                </div>
-            )}
 
             {isAdding && (
                 <div className="p-10 rounded-[2.5rem] border border-primary/30 bg-primary/5 animate-in fade-in slide-in-from-top-4 duration-500 backdrop-blur-md">
@@ -608,6 +608,36 @@ export default function ProjectView({ projectId, onDataChange }: { projectId: st
                 message="This action will bypass the 24-hour safety window and permanently destroy this agent. This cannot be undone."
                 confirmText="Terminate Now"
                 type="danger"
+            />
+
+            {isAtLimit && !isAdding && (
+                <div className="p-8 rounded-[2.5rem] glass-card flex items-center gap-6 group relative overflow-hidden mt-12 bg-primary/5 border-primary/20">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:rotate-12 transition-transform">
+                        <Zap size={60} className="text-primary" />
+                    </div>
+                    <div className="size-14 rounded-2xl bg-primary/20 text-primary flex items-center justify-center">
+                        <ShieldCheck size={30} />
+                    </div>
+                    <div className="flex-1">
+                        <p className="text-xl font-bold tracking-tight mb-1 text-primary">Agent limit reached for FREE tier</p>
+                        <p className="text-sm font-medium text-muted-foreground">Upgrade to the **PRO** cluster to scale up to 10 autonomous agents.</p>
+                    </div>
+                    <button className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:opacity-90 active:scale-95 transition-all shadow-xl shadow-primary/20">Upgrade Now</button>
+                </div>
+            )}
+
+            <ConfirmationModal
+                isOpen={isLimitModalOpen}
+                onClose={() => setIsLimitModalOpen(false)}
+                onConfirm={() => {
+                    setIsLimitModalOpen(false);
+                    // Proactive: trigger upgrade modal or just close? 
+                    // User said "display the message as alert modal as the Execute Final Termination?"
+                }}
+                title="Agent Limit Reached"
+                message="You have reached the maximum number of agents for the FREE tier (2 agents). Please upgrade to PRO to deploy more intelligence."
+                confirmText="Understood"
+                type="warning"
             />
         </div>
     );

@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { UpdateAgentConfigSchema, CreateAgentSchema } from '@eliza-manager/shared';
+import { UpdateAgentConfigSchema, CreateAgentSchema, UserTier, TIER_CONFIG } from '@eliza-manager/shared';
 
 const agentRoutes: FastifyPluginAsync = async (fastify) => {
 
@@ -65,20 +65,48 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
             return reply.unauthorized('User identity lost');
         }
 
+
         fastify.log.info({ userId: request.userId, projectId, name, framework }, 'Attempting to create agent');
 
-        // Check agent limits
-        const { count } = await fastify.supabase
-            .from('agents')
-            .select('*', { count: 'exact', head: true })
-            .eq('project_id', projectId);
+        // 1. Fetch User Profile to get Tier
+        const { data: profile, error: profileError } = await fastify.supabase
+            .from('profiles')
+            .select('tier')
+            .eq('id', request.userId)
+            .single();
 
-        const limit = 1; // Default to 1 agent limit as 'tier' column is missing
-        if (count !== null && count >= limit) {
-            throw fastify.httpErrors.forbidden(`Agent limit reached for FREE tier (${limit} agent${limit === 1 ? '' : 's'})`);
+        if (profileError) {
+            fastify.log.error({ profileError, userId: request.userId }, 'Failed to fetch user profile for tier check');
+            throw profileError;
         }
 
-        // 1. Create agent
+        const userTier = (profile?.tier as UserTier) || UserTier.FREE;
+        const tierLimit = TIER_CONFIG[userTier]?.maxAgents || TIER_CONFIG[UserTier.FREE].maxAgents;
+
+        // 2. Count limits (Global count for user)
+        // First get all project IDs for user
+        const { data: userProjects, error: projError } = await fastify.supabase
+            .from('projects')
+            .select('id')
+            .eq('user_id', request.userId);
+
+        if (projError) throw projError;
+
+        if (userProjects && userProjects.length > 0) {
+            const projectIds = userProjects.map(p => p.id);
+            const { count, error: countError } = await fastify.supabase
+                .from('agents')
+                .select('*', { count: 'exact', head: true })
+                .in('project_id', projectIds);
+
+            if (countError) throw countError;
+
+            if (count !== null && count >= tierLimit) {
+                throw fastify.httpErrors.forbidden(`Agent limit reached for ${userTier.toUpperCase()} tier (${tierLimit} agent${tierLimit === 1 ? '' : 's'})`);
+            }
+        }
+
+        // 3. Create agent
         fastify.log.info({ projectId, name, framework }, 'Inserting new agent into database');
         const { data: agent, error: agentError } = await fastify.supabase
             .from('agents')
@@ -88,7 +116,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
 
         if (agentError) throw agentError;
 
-        // 2. Initialize desired state
+        // 4. Initialize desired state
         const initialConfig = configTemplate || (framework === 'openclaw' ? {
             auth: {
                 profiles: {
@@ -108,12 +136,15 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
             plugins: ['@elizaos/plugin-bootstrap']
         });
 
+        const { metadata } = CreateAgentSchema.parse(request.body);
+
         const { error: stateError } = await fastify.supabase
             .from('agent_desired_state')
             .insert([{
                 agent_id: agent.id,
                 enabled: false,
-                config: initialConfig
+                config: initialConfig,
+                metadata: metadata || {}
             }]);
 
         if (stateError) throw stateError;
@@ -129,7 +160,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
     // Update agent configuration (desired state)
     fastify.patch('/:agentId/config', async (request) => {
         const { agentId } = request.params as { agentId: string };
-        const { enabled, config, purge_at } = UpdateAgentConfigSchema.parse(request.body);
+        const { enabled, config, metadata, purge_at } = UpdateAgentConfigSchema.parse(request.body);
 
         // Verify agent ownership via project
         const { data: agent } = await fastify.supabase
@@ -152,6 +183,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
         const updates: any = { updated_at: new Date().toISOString() };
         if (enabled !== undefined) updates.enabled = enabled;
         if (config !== undefined) updates.config = config;
+        if (metadata !== undefined) updates.metadata = metadata;
         if (purge_at !== undefined) {
             fastify.log.debug({ agentId, purge_at }, 'Processing purge_at update');
             updates.purge_at = purge_at;

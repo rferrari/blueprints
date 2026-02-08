@@ -6,6 +6,7 @@ import { docker } from '../lib/docker';
 import { getAgentContainerName, sanitizeConfig } from '../lib/utils';
 import { DOCKER_NETWORK_NAME, OPENCLAW_IMAGE, VPS_PUBLIC_IP } from '../lib/constants';
 import { cryptoUtils } from '../lib/crypto';
+import { UserTier, SecurityLevel, resolveSecurityLevel } from '@eliza-manager/shared';
 
 const failureCounts = new Map<string, number>();
 const MAX_RETRIES = 3;
@@ -90,7 +91,6 @@ export async function startOpenClawAgent(agentId: string, config: any) {
 
         const configPath = path.join(openclawDir, 'openclaw.json');
 
-        // ... (config logic exactly as before)
         const configWithDefaults = {
             ...config,
             gateway: {
@@ -132,20 +132,53 @@ export async function startOpenClawAgent(agentId: string, config: any) {
             env.push(`OPENCLAW_GATEWAY_TOKEN=${finalConfig.gateway.auth.token}`);
         }
 
-        // Security Tiers: low (sandbox), pro (elevated), custom (root)
-        const tier = finalConfig.metadata?.security_tier || 'low';
+        // Fetch User Tier for Security Enforcement
+        const { data: agentData, error: agentError } = await supabase
+            .from('agents')
+            .select(`
+                project_id,
+                projects (
+                    user_id,
+                    profiles (
+                        tier
+                    )
+                )
+            `)
+            .eq('id', agentId)
+            .single();
+
+        if (agentError || !agentData) {
+            logger.error(`Failed to fetch project/tier info for agent ${agentId}: ${agentError?.message}`);
+        }
+
+        // specific casting because supabase types might be loose here in the worker
+        const userTier = (agentData?.projects as any)?.profiles?.tier as UserTier || UserTier.FREE;
+        const requestedLevel = (config.metadata?.security_level as SecurityLevel) || SecurityLevel.SANDBOX;
+
+        // Resolve Effective Security Level
+        const effectiveLevel = resolveSecurityLevel(userTier, requestedLevel);
+
+        // Apply Security Context
         let user = '1000:1000';
         let capAdd: string[] = [];
+        const binds = [`${hostOpenclawDir}:/home/node/.openclaw`];
 
-        if (tier === 'custom') {
-            user = '0:0'; // Root mode
-            logger.warn(`🚀 Agent ${agentId} starting in CUSTOM tier (ROOT PRIVILEGES)`);
-        } else if (tier === 'pro') {
-            user = '1000:1000';
-            capAdd = ['SYS_ADMIN']; // Example elevated privilege
-            logger.info(`🛡️ Agent ${agentId} starting in PRO tier (Elevated Sandbox)`);
-        } else {
-            logger.info(`🔒 Agent ${agentId} starting in LOW tier (Strict Sandbox)`);
+        switch (effectiveLevel) {
+            case SecurityLevel.ROOT:
+                user = '0:0';
+                capAdd = ['SYS_ADMIN', 'NET_ADMIN'];
+                logger.warn(`🚀 Agent ${agentId} starting in ROOT security level (User Tier: ${userTier})`);
+                break;
+            case SecurityLevel.SYSADMIN:
+                user = '1000:1000';
+                capAdd = ['SYS_ADMIN'];
+                logger.info(`🛡️ Agent ${agentId} starting in SYSADMIN security level`);
+                break;
+            case SecurityLevel.SANDBOX:
+            default:
+                user = '1000:1000';
+                logger.info(`🔒 Agent ${agentId} starting in SANDBOX security level`);
+                break;
         }
 
         // Verify image exists locally or attempt to pull
@@ -174,7 +207,7 @@ export async function startOpenClawAgent(agentId: string, config: any) {
             Cmd: ['node', 'dist/index.js', 'gateway', '--bind', 'lan'],
             ExposedPorts: { '18789/tcp': {} },
             HostConfig: {
-                Binds: [`${hostOpenclawDir}:/home/node/.openclaw`],
+                Binds: binds,
                 PortBindings: { '18789/tcp': [{ HostPort: hostPort.toString() }] },
                 RestartPolicy: { Name: 'unless-stopped' },
                 CapAdd: capAdd
@@ -190,7 +223,8 @@ export async function startOpenClawAgent(agentId: string, config: any) {
             agent_id: agentId,
             status: 'running',
             endpoint_url: endpointUrl,
-            last_sync: new Date().toISOString()
+            last_sync: new Date().toISOString(),
+            effective_security_tier: effectiveLevel.toString()
         });
 
         failureCounts.delete(agentId);
@@ -217,18 +251,23 @@ export async function stopOpenClawAgent(agentId: string) {
     const containerName = getAgentContainerName(agentId, 'openclaw');
     try {
         const container = await docker.getContainer(containerName);
+        console.log(`Stopping container ${containerName}...`);
         await container.stop();
+        console.log(`Removing container ${containerName}...`);
         await container.remove();
         logger.info(`OpenClaw agent ${agentId} stopped and container removed.`);
+
+        await supabase.from('agent_actual_state').upsert({
+            agent_id: agentId,
+            status: 'stopped',
+            endpoint_url: null,
+            last_sync: new Date().toISOString()
+        });
     } catch (err: any) {
         logger.warn(`Failed to stop OpenClaw agent ${agentId} (likely already stopped):`, err.message);
     }
 }
 
-/**
- * Executes a command inside the OpenClaw agent's container.
- * This powers the 'Terminal Tool' for OpenBot.
- */
 export async function runTerminalCommand(agentId: string, command: string): Promise<string> {
     const containerName = getAgentContainerName(agentId, 'openclaw');
     try {
@@ -242,7 +281,6 @@ export async function runTerminalCommand(agentId: string, command: string): Prom
         logger.info(`OpenClaw: Starting exec ${exec.Id} for command "${command}"...`);
         const result = await docker.startExec(exec.Id, { Detach: false, Tty: true });
         logger.info(`OpenClaw: Exec ${exec.Id} finished.`);
-        // The startExec result for sh -c is usually the output stream if Attached
         return typeof result === 'string' ? result : JSON.stringify(result);
     } catch (err: any) {
         logger.error(`Terminal Error for ${agentId}:`, err.message);

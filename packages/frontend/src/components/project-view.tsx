@@ -249,16 +249,19 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         }
     };
 
-    const saveAgentConfig = async (config: any) => {
+    const saveAgentConfig = async (config: any, metadata?: any) => {
         if (!editingAgent || !session?.access_token) return;
         try {
+            const body: any = { config };
+            if (metadata) body.metadata = metadata;
+
             const res = await fetch(`${API_URL}/agents/${editingAgent.id}/config`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${session.access_token}`
                 },
-                body: JSON.stringify({ config })
+                body: JSON.stringify(body)
             });
             if (!res.ok) throw new Error('Failed to save config');
             await fetchProjectAndAgents();

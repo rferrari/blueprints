@@ -57,6 +57,28 @@ export default function SettingsView({ user }: SettingsViewProps) {
         }
     };
 
+    const [tier, setTier] = useState<string>('free');
+
+    React.useEffect(() => {
+        const fetchTier = async () => {
+            const { data } = await supabase.from('profiles').select('tier').eq('id', user.id).single();
+            if (data) setTier(data.tier);
+        };
+        fetchTier();
+    }, [user.id]);
+
+    const handleUpdateTier = async (newTier: string) => {
+        setLoading(true);
+        const { error } = await supabase.from('profiles').update({ tier: newTier }).eq('id', user.id);
+        if (error) {
+            setMessage({ type: 'error', text: 'Failed to update tier' });
+        } else {
+            setTier(newTier);
+            setMessage({ type: 'success', text: `Tier updated to ${newTier.toUpperCase()}` });
+        }
+        setLoading(false);
+    };
+
     return (
         <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="glass-card rounded-[2.5rem] p-10 md:p-16 relative overflow-hidden">
@@ -65,9 +87,14 @@ export default function SettingsView({ user }: SettingsViewProps) {
                 </div>
 
                 <div className="relative z-10">
-                    <div className="mb-10">
-                        <h2 className="text-3xl font-black tracking-tight mb-2">Neural Identity</h2>
-                        <p className="text-muted-foreground font-medium">Manage your personal credentials and access keys.</p>
+                    <div className="mb-10 flex items-center justify-between">
+                        <div>
+                            <h2 className="text-3xl font-black tracking-tight mb-2">Neural Identity</h2>
+                            <p className="text-muted-foreground font-medium">Manage your personal credentials and access keys.</p>
+                        </div>
+                        <div className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest text-muted-foreground">
+                            Current Tier: <span className="text-primary">{tier}</span>
+                        </div>
                     </div>
 
                     <form onSubmit={handleUpdateProfile} className="space-y-8">
@@ -147,10 +174,35 @@ export default function SettingsView({ user }: SettingsViewProps) {
                             </p>
                         </div>
 
+                        <div className="h-px bg-white/5 my-8" />
+
+                        {/* Dev Tier Override */}
+                        <div className="space-y-6">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Lock size={16} className="text-amber-500" />
+                                <h3 className="text-sm font-black uppercase tracking-widest text-amber-500">Development Tier Override</h3>
+                            </div>
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                                {['free', 'pro', 'custom', 'enterprise'].map((t) => (
+                                    <button
+                                        key={t}
+                                        type="button"
+                                        onClick={() => handleUpdateTier(t)}
+                                        className={`p-4 rounded-xl border text-xs font-black uppercase tracking-widest transition-all ${tier === t
+                                                ? 'bg-amber-500/10 border-amber-500 text-amber-500'
+                                                : 'bg-white/5 border-white/10 text-muted-foreground hover:bg-white/10'
+                                            }`}
+                                    >
+                                        {t}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         {message && (
                             <div className={`p-5 rounded-2xl flex items-center gap-3 ${message.type === 'success'
-                                    ? 'bg-green-500/10 border border-green-500/20 text-green-500'
-                                    : 'bg-destructive/10 border border-destructive/20 text-destructive'
+                                ? 'bg-green-500/10 border border-green-500/20 text-green-500'
+                                : 'bg-destructive/10 border border-destructive/20 text-destructive'
                                 }`}>
                                 {message.type === 'success' ? <Check size={20} /> : <Shield size={20} />}
                                 <span className="font-bold text-sm">{message.text}</span>

@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { CreateProjectSchema } from '@eliza-manager/shared';
+import { CreateProjectSchema, UserTier, TIER_CONFIG } from '@eliza-manager/shared';
 
 const projectRoutes: FastifyPluginAsync = async (fastify) => {
 
@@ -32,6 +32,33 @@ const projectRoutes: FastifyPluginAsync = async (fastify) => {
         if (!request.userId) {
             fastify.log.error({ name }, 'userId missing in POST /projects');
             return reply.unauthorized('User identity lost - please re-login');
+        }
+
+        // 1. Fetch User Profile to get Tier
+        const { data: profile, error: profileError } = await fastify.supabase
+            .from('profiles')
+            .select('tier')
+            .eq('id', request.userId)
+            .single();
+
+        if (profileError) {
+            fastify.log.error({ profileError, userId: request.userId }, 'Failed to fetch user profile for tier check');
+            throw profileError;
+        }
+
+        const userTier = (profile?.tier as UserTier) || UserTier.FREE;
+        const tierLimit = TIER_CONFIG[userTier]?.maxProjects || TIER_CONFIG[UserTier.FREE].maxProjects;
+
+        // 2. Count existing projects
+        const { count, error: countError } = await fastify.supabase
+            .from('projects')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', request.userId);
+
+        if (countError) throw countError;
+
+        if (count !== null && count >= tierLimit) {
+            throw fastify.httpErrors.forbidden(`Project limit reached for ${userTier.toUpperCase()} tier (${tierLimit} project${tierLimit === 1 ? '' : 's'})`);
         }
 
         const { data, error } = await fastify.supabase

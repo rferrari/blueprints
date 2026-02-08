@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck } from 'lucide-react';
+import { createClient } from '@/lib/supabase';
+import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG } from '@eliza-manager/shared';
+import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck, Lock, Unlock } from 'lucide-react';
 
 interface OpenClawWizardProps {
     agent: any;
-    onSave: (config: any) => Promise<void>;
+    onSave: (config: any, metadata?: any) => Promise<void>;
     onClose: () => void;
 }
 
@@ -17,6 +19,30 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     const [veniceModels, setVeniceModels] = useState<any[]>([]);
     const [fetchingModels, setFetchingModels] = useState(false);
     const [modelError, setModelError] = useState<string | null>(null);
+
+    // Tier & Security
+    const supabase = createClient();
+    const [tier, setTier] = useState<UserTier>(UserTier.FREE);
+    const [securityLevel, setSecurityLevel] = useState<SecurityLevel>(SecurityLevel.SANDBOX);
+
+    React.useEffect(() => {
+        const fetchTier = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+                const { data } = await supabase.from('profiles').select('tier').eq('id', session.user.id).single();
+                if (data) setTier(data.tier as UserTier);
+            }
+        };
+        fetchTier();
+    }, []);
+
+    // Load initial security level from metadata if exists
+    React.useEffect(() => {
+        const existingLevel = getOne(agent.agent_desired_state)?.metadata?.security_level;
+        if (existingLevel !== undefined) {
+            setSecurityLevel(existingLevel);
+        }
+    }, [agent]);
 
     // Initial State derived from existing config or defaults
     const [config, setConfig] = useState({
@@ -73,9 +99,10 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         { id: 1, title: 'Intelligence Provider', icon: <Zap size={20} /> },
         { id: 2, title: 'Neural Credentials', icon: <Key size={20} /> },
         { id: 3, title: 'Model Selection', icon: <Cpu size={20} />, hidden: config.provider !== 'venice' },
-        { id: 4, title: 'Gateway Security', icon: <Shield size={20} /> },
-        { id: 5, title: 'Communication Channels', icon: <Share2 size={20} /> },
-        { id: 6, title: 'Channel Configuration', icon: <MessageSquare size={20} /> },
+        { id: 4, title: 'Permissions & Security', icon: <Shield size={20} /> },
+        { id: 5, title: 'Gateway Security', icon: <Lock size={20} /> },
+        { id: 6, title: 'Communication Channels', icon: <Share2 size={20} /> },
+        { id: 7, title: 'Channel Configuration', icon: <MessageSquare size={20} /> },
     ].filter(s => !s.hidden);
 
     const handleSave = async () => {
@@ -83,7 +110,8 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         try {
             // Channel Configuration
             const channelsConfig: any = {};
-            if (config.channels.blueprints_chat) channelsConfig.blueprints_chat = { enabled: true };
+            // Mandatory blueprints_chat is now implicit, do not write to config.
+
             if (config.channels.telegram && config.telegramToken) channelsConfig.telegram = { enabled: true, botToken: config.telegramToken };
             if (config.channels.discord && config.discordToken) channelsConfig.discord = { enabled: true, token: config.discordToken };
             if (config.channels.slack && config.slackToken) channelsConfig.slack = { enabled: true, token: config.slackToken };
@@ -176,7 +204,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                 }
             };
 
-            await onSave(finalConfig);
+            await onSave(finalConfig, { security_level: securityLevel });
             onClose();
         } catch (err) {
             console.error('Failed to save OpenClaw config:', err);
@@ -343,26 +371,67 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         )}
 
                         {step === 4 && (
-                            <div className="space-y-8">
+                            <div className="space-y-6">
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    The **Gateway Token** allows the Blueprints brain to securely communicate with the OpenClaw container. We've generated a secure one for you.
+                                    Configure the operating privileges for **{agent.name}**. Higher levels require higher User Tiers.
                                 </p>
-                                <div className="space-y-4">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Internal Gateway Token</label>
-                                    <div className="relative">
-                                        <input
-                                            type="text"
-                                            value={config.gatewayToken}
-                                            onChange={(e) => setConfig({ ...config, gatewayToken: e.target.value })}
-                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-mono text-sm focus:border-primary outline-none transition-all"
-                                        />
-                                        <button
-                                            onClick={() => setConfig({ ...config, gatewayToken: Math.random().toString(36).substring(2, 15) })}
-                                            className="absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-white/5 rounded-xl transition-colors text-primary"
-                                        >
-                                            <Zap size={18} />
-                                        </button>
-                                    </div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {[
+                                        {
+                                            level: SecurityLevel.SANDBOX,
+                                            title: 'Sandbox',
+                                            icon: <Shield size={24} className="text-green-400" />,
+                                            desc: 'Standard isolation. Safe for all agents.'
+                                        },
+                                        {
+                                            level: SecurityLevel.SYSADMIN,
+                                            title: 'Privileged',
+                                            icon: <Lock size={24} className="text-amber-400" />,
+                                            desc: 'Access to system calls and docker socket.'
+                                        },
+                                        {
+                                            level: SecurityLevel.ROOT,
+                                            title: 'Host / Root',
+                                            icon: <Unlock size={24} className="text-red-500" />,
+                                            desc: 'Full host network and root access. Dangerous.'
+                                        }
+                                    ].map((opt) => {
+                                        const allowed = resolveSecurityLevel(tier, opt.level) === opt.level;
+                                        const isSelected = securityLevel === opt.level;
+
+                                        return (
+                                            <button
+                                                key={opt.level}
+                                                onClick={() => allowed && setSecurityLevel(opt.level)}
+                                                disabled={!allowed}
+                                                className={`p-6 rounded-3xl border text-left transition-all flex flex-col gap-4 relative overflow-hidden ${isSelected
+                                                    ? 'border-primary bg-primary/10 ring-4 ring-primary/10'
+                                                    : allowed
+                                                        ? 'border-white/5 bg-white/5 hover:border-white/10'
+                                                        : 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
+                                                    }`}
+                                            >
+                                                <div className="flex justify-between items-start w-full">
+                                                    <div className="p-3 rounded-2xl bg-white/5">
+                                                        {opt.icon}
+                                                    </div>
+                                                    {isSelected && <div className="text-primary"><Check size={20} /></div>}
+                                                    {!allowed && <div className="text-muted-foreground px-2 py-1 rounded bg-white/5 text-[10px] font-black uppercase">Locked</div>}
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-black text-sm uppercase tracking-widest mb-2">{opt.title}</h4>
+                                                    <p className="text-xs text-muted-foreground leading-relaxed">{opt.desc}</p>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs font-medium flex gap-3 items-center">
+                                    <ShieldCheck size={16} />
+                                    <span>
+                                        Your current tier is <strong>{tier.toUpperCase()}</strong>.
+                                        {tier === 'free' && " Upgrade to Pro for Privileged access."}
+                                    </span>
                                 </div>
                             </div>
                         )}

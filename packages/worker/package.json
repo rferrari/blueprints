@@ -11,7 +11,9 @@
     "dependencies": {
         "@supabase/supabase-js": "^2.93.2",
         "axios": "^1.7.9",
-        "dotenv": "^16.4.7"
+        "dotenv": "^16.4.7",
+        "@eliza-manager/shared": "workspace:*",
+        "dockerode": "^3.3.5"
     },
     "devDependencies": {
         "@types/dockerode": "^4.0.1",

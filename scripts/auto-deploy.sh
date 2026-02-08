@@ -8,6 +8,9 @@ REPO_DIR="/opt/blueprints"
 SERVICE_NAME="worker"
 LOG_FILE="/var/log/blueprints-deploy.log"
 
+# Ensure Bun is in PATH (common locations)
+export PATH=$PATH:/root/.bun/bin:/usr/local/bin:/home/ubuntu/.bun/bin:/home/debian/.bun/bin
+
 # function to log messages
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"

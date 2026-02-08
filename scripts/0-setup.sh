@@ -21,6 +21,7 @@ SCRIPTS=(
     "3-setup-openclaw.sh"
     "4-setup-network.sh"
     "5-vps-diagnostics.sh"
+    "6-setup-auto-deploy.sh"
 )
 
 echo "========================================================"

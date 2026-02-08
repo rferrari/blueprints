@@ -63,19 +63,19 @@ export default function FeedbackView() {
     }
 
     return (
-        <div className="max-w-4xl mx-auto p-8 animate-in fade-in slide-in-from-bottom-10 duration-700">
-            <header className="mb-12">
+        <div className="max-w-4xl mx-auto p-4 md:p-8 animate-in fade-in slide-in-from-bottom-10 duration-700">
+            <header className="mb-8 md:mb-12">
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
                     <MessageSquare size={14} className="text-primary" />
                     <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Direct Feed</span>
                 </div>
-                <h1 className="text-4xl md:text-5xl font-black tracking-tighter mb-4 italic">Platform <span className="text-primary">Sentiment</span></h1>
-                <p className="text-muted-foreground font-medium max-w-xl">
+                <h1 className="text-3xl md:text-5xl font-black tracking-tighter mb-4 italic">Platform <span className="text-primary">Sentiment</span></h1>
+                <p className="text-muted-foreground font-medium max-w-xl text-sm md:text-base">
                     Communicate directly with the engineering team. Your ratings and suggestions directly influence the blueprint roadmap.
                 </p>
             </header>
 
-            <form onSubmit={handleSubmit} className="glass-card rounded-[3rem] p-12 border border-white/5 relative overflow-hidden">
+            <form onSubmit={handleSubmit} className="glass-card rounded-[2rem] md:rounded-[3rem] p-6 md:p-12 border border-white/5 relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
                     <Sparkles size={120} className="text-primary" />
                 </div>

@@ -49,7 +49,8 @@ pause
 
 echo -e "${BOLD}🗄️  3. Supabase Connection Check${NC}"
 # Load Supabase credentials from worker .env if it exists
-DOTENV_PATH="/home/adam/Projects/blankspace/blueprints/packages/worker/.env"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DOTENV_PATH="$SCRIPT_DIR/../packages/worker/.env"
 if [ -f "$DOTENV_PATH" ]; then
     S_URL=$(grep "SUPABASE_URL=" "$DOTENV_PATH" | cut -d'=' -f2)
     S_KEY=$(grep "SUPABASE_SERVICE_ROLE_KEY=" "$DOTENV_PATH" | cut -d'=' -f2)

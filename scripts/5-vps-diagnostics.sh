@@ -148,13 +148,9 @@ fi
 
 pause
 
-echo -e "${BOLD}🗃️  8. Database Integrity Check${NC}"
-echo -e "${BLUE}Checking User Profiles (first 5):${NC}"
-bun run scripts/debug-db.ts profiles '{}' 5 || echo -e "${RED}❌ Failed to query profiles table.${NC}"
-
-echo -e ""
-echo -e "${BLUE}Checking Agent States (first 5):${NC}"
-bun run scripts/debug-db.ts agent_actual_state '{}' 5 || echo -e "${RED}❌ Failed to query agent_actual_state table.${NC}"
+echo -e "${BOLD}🗃️  8. Database Schema Integrity Check${NC}"
+echo -e "${BLUE}Comparing live schema with migrations/schema.sql...${NC}"
+bun run $SCRIPT_DIR/db-integrity-check.ts || echo -e "${RED}❌ Schema mismatch detected!${NC}"
 
 pause
 

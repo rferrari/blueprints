@@ -49,9 +49,10 @@ export async function reconcile() {
             const desired = agent.agent_desired_state;
             const actual = agent.agent_actual_state;
 
-            if (!desired || !actual) continue;
+            if (!desired) continue;
 
-            let isRunning = actual.status === 'running';
+            const status = actual?.status || 'stopped';
+            let isRunning = status === 'running';
             const shouldBeRunning = desired.enabled;
 
             // Verify Docker state for OpenClaw/Eliza agents
@@ -72,8 +73,12 @@ export async function reconcile() {
             // Purge Logic
             if (desired.purge_at && now >= new Date(desired.purge_at)) {
                 logger.info(`[TERMINATE] Executing final deletion for agent ${agent.id}...`);
-                if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
-                else await stopElizaAgent(agent.id);
+                try {
+                    if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
+                    else await stopElizaAgent(agent.id);
+                } catch (cleanupErr: any) {
+                    logger.warn(`[PURGE] Failed to stop/remove container for ${agent.id}: ${cleanupErr.message}. Proceeding with DB deletion.`);
+                }
 
                 await supabase.from('agents').delete().eq('id', agent.id);
                 continue;

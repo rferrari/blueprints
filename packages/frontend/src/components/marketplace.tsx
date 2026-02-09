@@ -279,10 +279,10 @@ export default function Marketplace({ projectId }: { projectId: string }) {
                 </div>
                 <div className="relative z-10 max-w-2xl">
                     <div className="flex items-center gap-2 mb-4">
-                        <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-[10px] font-black uppercase tracking-widest">Available Functions</span>
+                        <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-[10px] font-black uppercase tracking-widest">Feature Preview</span>
                     </div>
                     <h2 className="text-4xl font-black tracking-tight mb-4">Functional <span className="text-transparent bg-clip-text bg-gradient-unicorn">Blueprints</span></h2>
-                    <p className="text-muted-foreground font-medium text-lg mb-8">Choose a specialized blueprint to jumpstart your agent's deployment.</p>
+                    <p className="text-muted-foreground font-medium text-lg mb-8">Blueprints will allow you to deploy a specialized blueprint to jumpstart your agent's deployment.</p>
                 </div>
             </div>
 

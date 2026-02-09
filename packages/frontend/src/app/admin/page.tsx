@@ -101,21 +101,28 @@ export default function AdminDashboard() {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) return;
 
-            const { error } = await supabase
-                .from('profiles')
-                .update({ tier: newTier })
-                .eq('id', userId);
+            const res = await fetch(`${API_URL}/admin/users/${userId}/tier`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ tier: newTier })
+            });
 
-            if (error) throw error;
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.message || 'Failed to update user tier');
+            }
 
             // Refresh modal data
             if (modalOpen === 'users') {
                 openModal('users');
             }
             setEditingUserId(null);
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to update user tier:', err);
-            alert('Failed to update user plan');
+            alert(err.message || 'Failed to update user tier');
         }
     };
 
@@ -451,7 +458,7 @@ export default function AdminDashboard() {
                                                 <th className="text-left p-3 font-black uppercase text-xs text-muted-foreground">Email</th>
                                                 <th className="text-left p-3 font-black uppercase text-xs text-muted-foreground">Created</th>
                                                 <th className="text-left p-3 font-black uppercase text-xs text-muted-foreground">Role</th>
-                                                <th className="text-left p-3 font-black uppercase text-xs text-muted-foreground">Plan</th>
+                                                <th className="text-left p-3 font-black uppercase text-xs text-muted-foreground">Tier</th>
                                                 <th className="text-left p-3 font-black uppercase text-xs text-muted-foreground">Actions</th>
                                             </>
                                         )}
@@ -506,11 +513,11 @@ export default function AdminDashboard() {
                                                                 <select
                                                                     value={editingTier}
                                                                     onChange={(e) => setEditingTier(e.target.value)}
-                                                                    className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-xs font-bold uppercase outline-none focus:border-primary"
+                                                                    className="bg-black border border-white/20 rounded-lg px-3 py-1 text-xs font-bold uppercase outline-none focus:border-primary text-white"
                                                                 >
-                                                                    <option value="free">Free</option>
-                                                                    <option value="pro">Pro</option>
-                                                                    <option value="enterprise">Enterprise</option>
+                                                                    <option value="free" className="bg-black text-white">Free</option>
+                                                                    <option value="pro" className="bg-black text-white">Pro</option>
+                                                                    <option value="enterprise" className="bg-black text-white">Enterprise</option>
                                                                 </select>
                                                             ) : (
                                                                 <span className="px-2 py-1 rounded-lg bg-white/5 text-white text-xs font-bold uppercase">
@@ -542,7 +549,7 @@ export default function AdminDashboard() {
                                                                     }}
                                                                     className="px-3 py-1 bg-primary/20 text-primary rounded-lg text-xs font-bold uppercase hover:bg-primary/30 transition-colors"
                                                                 >
-                                                                    Edit Plan
+                                                                    Edit Tier
                                                                 </button>
                                                             )}
                                                         </td>

@@ -81,6 +81,28 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
         return profiles;
     });
 
+    // Update User Tier (Admin only)
+    fastify.patch<{ Params: { userId: string }, Body: { tier: string } }>('/users/:userId/tier', async (request, reply) => {
+        const { userId } = request.params;
+        const { tier } = request.body;
+
+        if (!['free', 'pro', 'enterprise'].includes(tier)) {
+            return reply.badRequest('Invalid tier level');
+        }
+
+        const { error } = await fastify.supabase
+            .from('profiles')
+            .update({ tier })
+            .eq('id', userId);
+
+        if (error) {
+            fastify.log.error(error, `Failed to update tier for user ${userId}`);
+            throw error;
+        }
+
+        return { success: true, userId, tier };
+    });
+
     // 3. Clusters (Projects) listing (Admin only)
     fastify.get('/clusters', async () => {
         const { data: projects, error } = await fastify.supabase

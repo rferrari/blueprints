@@ -24,6 +24,7 @@ export async function reconcile() {
                 agent_desired_state (
                     enabled,
                     config,
+                    metadata,
                     purge_at
                 ),
                 agent_actual_state (
@@ -114,7 +115,7 @@ export async function reconcile() {
                     }
 
                     if (agent.framework === 'openclaw') {
-                        await startOpenClawAgent(agent.id, desired.config);
+                        await startOpenClawAgent(agent.id, desired.config, desired.metadata);
                     } else {
                         await startElizaAgent(agent.id, desired.config);
                     }

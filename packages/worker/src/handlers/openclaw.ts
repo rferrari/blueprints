@@ -8,9 +8,6 @@ import { DOCKER_NETWORK_NAME, OPENCLAW_IMAGE, VPS_PUBLIC_IP } from '../lib/const
 import { cryptoUtils } from '../lib/crypto';
 import { UserTier, SecurityLevel, resolveSecurityLevel } from '@eliza-manager/shared';
 
-const failureCounts = new Map<string, number>();
-const MAX_RETRIES = 3;
-
 export async function startOpenClawAgent(agentId: string, config: any) {
     logger.info(`Starting OpenClaw agent ${agentId}...`);
 
@@ -55,7 +52,6 @@ export async function startOpenClawAgent(agentId: string, config: any) {
                     last_sync: new Date().toISOString()
                 });
                 if (syncError) throw syncError;
-                failureCounts.delete(agentId);
                 return;
             }
             logger.info(`Container ${containerName} is in state "${info.State.Status}". Removing and recreating...`);
@@ -226,23 +222,14 @@ export async function startOpenClawAgent(agentId: string, config: any) {
             effective_security_tier: effectiveLevel.toString()
         });
 
-        failureCounts.delete(agentId);
     } catch (err: any) {
         logger.error(`Failed to start OpenClaw agent ${agentId}:`, err.message);
-
-        const currentFailures = (failureCounts.get(agentId) || 0) + 1;
-        failureCounts.set(agentId, currentFailures);
-
-        if (currentFailures >= MAX_RETRIES) {
-            await supabase.from('agent_desired_state').update({ enabled: false }).eq('agent_id', agentId);
-            failureCounts.delete(agentId);
-        }
-
         await supabase.from('agent_actual_state').upsert({
             agent_id: agentId,
             status: 'error',
             error_message: err.message
         });
+        throw err; // Re-throw for reconciler to handle retries
     }
 }
 

@@ -104,6 +104,7 @@ export async function startElizaAgent(agentId: string, config: any) {
             status: 'error',
             error_message: err.message
         });
+        throw err; // Re-throw for reconciler to handle retries
     }
 }
 

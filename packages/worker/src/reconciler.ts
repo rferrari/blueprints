@@ -8,6 +8,7 @@ import { RECONCILE_INTERVAL_MS } from './lib/constants';
 
 let isReconciling = false;
 const configHashes = new Map<string, string>();
+const failCounts = new Map<string, number>();
 
 export async function reconcile() {
     if (isReconciling) return;
@@ -83,22 +84,47 @@ export async function reconcile() {
             const configChanged = lastHash && lastHash !== currentHash;
 
             if (shouldBeRunning && (!isRunning || configChanged)) {
-                if (configChanged && isRunning) {
-                    logger.info(`Config changed for agent ${agent.id}. Restarting...`);
-                    if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
-                    else await stopElizaAgent(agent.id);
+
+                // CPU SAFETY: Check for retry limit
+                const currentFailCount = failCounts.get(agent.id) || 0;
+                if (currentFailCount >= 3) {
+                    logger.error(`[CPU SAFETY] Agent ${agent.id} hit max retries (${currentFailCount}). Disabling...`);
+                    await supabase.from('agent_desired_state').update({ enabled: false }).eq('agent_id', agent.id);
+                    failCounts.delete(agent.id); // Reset so it can be tried again if user re-enables
+                    continue;
                 }
 
-                if (agent.framework === 'openclaw') {
-                    await startOpenClawAgent(agent.id, desired.config);
-                } else {
-                    await startElizaAgent(agent.id, desired.config);
+                try {
+                    if (configChanged && isRunning) {
+                        logger.info(`Config changed for agent ${agent.id}. Restarting...`);
+                        if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
+                        else await stopElizaAgent(agent.id);
+                    }
+
+                    if (agent.framework === 'openclaw') {
+                        await startOpenClawAgent(agent.id, desired.config);
+                    } else {
+                        await startElizaAgent(agent.id, desired.config);
+                    }
+                    configHashes.set(agent.id, currentHash);
+
+                    // Success! Reset fail count
+                    if (failCounts.has(agent.id)) {
+                        failCounts.delete(agent.id);
+                        logger.info(`Agent ${agent.id} started successfully. Failure count reset.`);
+                    }
+
+                } catch (startError: any) {
+                    const newCount = currentFailCount + 1;
+                    failCounts.set(agent.id, newCount);
+                    logger.error(`Failed to start agent ${agent.id} (Attempt ${newCount}/3):`, startError.message);
                 }
-                configHashes.set(agent.id, currentHash);
+
             } else if (!shouldBeRunning && isRunning) {
                 if (agent.framework === 'openclaw') await stopOpenClawAgent(agent.id);
                 else await stopElizaAgent(agent.id);
                 configHashes.delete(agent.id);
+                failCounts.delete(agent.id);
             } else if (shouldBeRunning && isRunning && !lastHash) {
                 configHashes.set(agent.id, currentHash);
             }

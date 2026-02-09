@@ -81,7 +81,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             // Venice returns { data: [{ id: "...", ... }] }
             if (data?.data && Array.isArray(data.data)) {
                 // Filter to only models that support function calling
-                const functionCallingModels = data.data.filter((m: any) => m.supportsFunctionCalling === true);
+                const functionCallingModels = data.data.filter((m: any) => m.model_spec?.capabilities?.supportsFunctionCalling === true);
                 setVeniceModels(functionCallingModels);
                 // If current modelId is not in the list, or we want to suggest one
                 if (!config.modelId || !functionCallingModels.find((m: any) => m.id === config.modelId)) {

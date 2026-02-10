@@ -25,6 +25,79 @@ Blueprints features a professional-grade terminal integrated directly into the a
 - **Advanced Diagnostics**: Access logs, file systems, and environment variables without leaving the dashboard.
 - **Slash Commands**: Power users can use the `/terminal <command>` prefix to trigger shell execution even while in Chat Mode.
 
+## Security Levels & Isolation Model
+
+Blueprints ships with a tiered container security model designed to balance safety, power, and operational control.
+
+### STANDARD (Default / Free Tier)
+
+Workspace-only access.
+
+- ✅ Only `/home/node` is writable  
+- ✅ Non-root user  
+- ✅ Root filesystem is read-only  
+- ✅ No Linux capabilities  
+- ✅ Cannot escalate privileges  
+
+Effectively equivalent to a Google Colab–style sandbox.
+
+Use case: hobby projects, experimentation, safe agents.
+
+---
+
+### PRO
+
+Builder-grade observability with limited privileges.
+
+- ✅ `SYS_ADMIN` capability  
+- ✅ Still non-root  
+- ✅ System filesystem remains read-only  
+- ✅ Can inspect kernel / system state  
+- ❌ Cannot modify system files  
+
+Use case: power users, agent builders, diagnostics.
+
+---
+
+### ADVANCED (Enterprise)
+
+Full container control.
+
+- ✅ Runs as root  
+- ✅ Read/write access to `/`  
+- ✅ `SYS_ADMIN`  
+- ✅ `NET_ADMIN`  
+
+Still isolated from the host (no docker socket, no host filesystem).
+
+Use case: enterprise automation, complex integrations.
+
+---
+
+### ADMIN (Internal / Hidden)
+
+Host-level access used only by platform operators for debugging and recovery.
+
+Not exposed to end users.
+
+---
+
+### Architectural Model
+
+STANDARD → jailed
+PRO → observability
+ADVANCED → power
+ADMIN → host (hidden)
+
+
+This maps cleanly to:
+
+- hobby  
+- builder  
+- enterprise  
+- ops  
+
+
 ## Prerequisites
 
 - [Bun](https://bun.sh/) (Runtime & Package Manager)

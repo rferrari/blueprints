@@ -1,7 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
-import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
 import 'dotenv/config';
 import { logger } from './lib/logger';
 import { startMessageBus } from './message-bus';

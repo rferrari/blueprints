@@ -8,8 +8,13 @@ import { DOCKER_NETWORK_NAME, OPENCLAW_IMAGE, VPS_PUBLIC_IP } from '../lib/const
 import { cryptoUtils } from '../lib/crypto';
 import { UserTier, SecurityLevel, resolveSecurityLevel } from '@eliza-manager/shared';
 
-export async function startOpenClawAgent(agentId: string, config: any, metadata: any = {}) {
-    logger.info(`Starting OpenClaw agent ${agentId}...`);
+export async function startOpenClawAgent(
+    agentId: string,
+    config: any,
+    metadata: any = {},
+    forceDoctor = false
+) {
+    logger.info(`Starting OpenClaw agent ${agentId} (doctor=${forceDoctor})...`);
 
     try {
         await supabase.from('agent_actual_state').upsert({
@@ -18,198 +23,169 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
         });
 
         const containerName = getAgentContainerName(agentId, 'openclaw');
-        const container = await docker.getContainer(containerName);
 
-        // Deterministic port mapping: 19000 + (hash of agentId % 1000)
-        const hash = agentId.split('-').reduce((acc, part) => acc + parseInt(part, 16), 0);
+        const hash = [...agentId].reduce((a, c) => a + c.charCodeAt(0), 0);
         const hostPort = 19000 + (hash % 1000);
-
         const endpointUrl = `http://${VPS_PUBLIC_IP}:${hostPort}`;
 
+        // Remove old container
         try {
-            const info = await container.inspect();
-            if (info.State.Status === 'running') {
-                logger.info(`Container ${containerName} is already running. Syncing DB state.`);
+            const existing = await docker.getContainer(containerName);
+            await existing.stop();
+            await existing.remove();
+        } catch { }
 
-                // Ensure workspace and config file exist
-                const projectRoot = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'));
-                const workspacePath = path.resolve(projectRoot, 'workspaces', agentId);
-                const openclawDir = path.join(workspacePath, '.openclaw');
-                if (!fs.existsSync(openclawDir)) {
-                    fs.mkdirSync(openclawDir, { recursive: true });
-                }
-                const configPath = path.join(openclawDir, 'openclaw.json');
-                if (!fs.existsSync(configPath)) {
-                    logger.warn(`Config file ${configPath} missing for running container. Re-creating...`);
-                    const decrypted = cryptoUtils.decryptConfig(config);
-                    fs.writeFileSync(configPath, JSON.stringify(decrypted, null, 2));
-                }
+        const projectRoot = path.resolve(process.cwd(), process.cwd().includes('packages') ? '../../' : './');
 
-                const { error: syncError } = await supabase.from('agent_actual_state').upsert({
-                    agent_id: agentId,
-                    status: 'running',
-                    endpoint_url: endpointUrl,
-                    last_sync: new Date().toISOString()
-                });
-                if (syncError) throw syncError;
-                return;
-            }
-            logger.info(`Container ${containerName} is in state "${info.State.Status}". Removing and recreating...`);
-            await container.remove();
-        } catch (e: any) {
-            // Container doesn't exist
-        }
+        const workspaceRoot = process.env.HOST_WORKSPACES_PATH
+            ? path.resolve(projectRoot, process.env.HOST_WORKSPACES_PATH)
+            : path.resolve(projectRoot, 'workspaces');
 
-        const projectRoot = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'));
-        const workspacePath = path.resolve(projectRoot, 'workspaces', agentId);
-        const openclawDir = path.join(workspacePath, '.openclaw');
+        const workspacePath = path.join(workspaceRoot, agentId);
+        const homeDir = path.join(workspacePath, 'home');
 
-        if (!fs.existsSync(openclawDir)) {
-            fs.mkdirSync(openclawDir, { recursive: true });
-            try {
-                fs.chownSync(openclawDir, 1000, 1000); // Ensure node user owns the directory
-            } catch (e) {
-                logger.warn(`Failed to chown openclaw dir: ${e}`);
-            }
-        }
+        fs.mkdirSync(homeDir, { recursive: true });
+        fs.mkdirSync(path.join(homeDir, '.openclaw', 'workspace'), { recursive: true });
 
-        // Determine Host path for Docker (Must be absolute)
-        const hostWorkspacesPath = process.env.HOST_WORKSPACES_PATH;
-        let hostOpenclawDir = openclawDir;
-
-        if (hostWorkspacesPath) {
-            // Resolve relative to projectRoot always
-            const resolvedHostWorkspaces = path.isAbsolute(hostWorkspacesPath)
-                ? hostWorkspacesPath
-                : path.resolve(projectRoot, hostWorkspacesPath);
-            hostOpenclawDir = path.join(resolvedHostWorkspaces, agentId, '.openclaw');
-        }
-
-        const configPath = path.join(openclawDir, 'openclaw.json');
+        const configPath = path.join(homeDir, '.openclaw', 'openclaw.json');
+        fs.mkdirSync(path.dirname(configPath), { recursive: true });
 
         const configWithDefaults = {
             ...config,
             gateway: {
                 ...(config.gateway || {}),
                 mode: 'local',
-                bind: 'lan'
+                bind: 'lan',
+                http: {
+                    ...(config.gateway?.http || {}),
+                    endpoints: {
+                        ...(config.gateway?.http?.endpoints || {}),
+                        chatCompletions: { enabled: true }
+                    }
+                }
             }
         };
 
         const decrypted = cryptoUtils.decryptConfig(configWithDefaults);
         const finalConfig = sanitizeConfig(decrypted);
 
-        // Self-Healing
         if (JSON.stringify(decrypted) !== JSON.stringify(finalConfig)) {
-            logger.info(`Self-Healing: Configuration mismatch detected for agent ${agentId}. Updating database.`);
-            const encryptedConfig = cryptoUtils.encryptConfig(finalConfig);
-            await supabase.from('agent_desired_state').update({ config: encryptedConfig }).eq('agent_id', agentId);
+            await supabase
+                .from('agent_desired_state')
+                .update({ config: cryptoUtils.encryptConfig(finalConfig) })
+                .eq('agent_id', agentId);
         }
 
-        // Filter out internal flags before writing to disk
         const configToWrite = { ...finalConfig };
         delete configToWrite.blueprints_chat;
         delete configToWrite.metadata;
 
         fs.writeFileSync(configPath, JSON.stringify(configToWrite, null, 2));
-        try {
-            fs.chownSync(configPath, 1000, 1000); // Ensure node user owns the config
-        } catch (e) {
-            logger.warn(`Failed to chown config file: ${e}`);
-        }
 
         const env = [
-            `OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw`,
-            `OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json`
+            `HOME=/home/node`,
+            `OPENCLAW_CONFIG_PATH=/home/node/.openclaw/openclaw.json`,
+            `OPENCLAW_GATEWAY_MODE=local`,
+            `OPENCLAW_WORKSPACE_DIR=/home/node/.openclaw/workspace`
         ];
+
 
         if (finalConfig.gateway?.auth?.token) {
             env.push(`OPENCLAW_GATEWAY_TOKEN=${finalConfig.gateway.auth.token}`);
         }
 
-        // Fetch User Tier and Project Tier for Security Enforcement
-        const { data: agentData, error: agentError } = await supabase
+        const { data } = await supabase
             .from('agents')
-            .select(`
-                project_id,
-                projects (
-                    user_id,
-                    tier
-                )
-            `)
+            .select(`projects ( tier )`)
             .eq('id', agentId)
             .single();
 
-        if (agentError || !agentData) {
-            logger.error(`Failed to fetch project/tier info for agent ${agentId}: ${agentError?.message}`);
-        }
-
-        // specific casting because supabase types might be loose here in the worker
-        const userTier = (agentData?.projects as any)?.tier as UserTier || UserTier.FREE;
-        // Resolve Effective Security Level
-        const requestedLevel = (metadata?.security_level as SecurityLevel) || SecurityLevel.SANDBOX;
+        const userTier = (data?.projects as any)?.tier ?? UserTier.FREE;
+        const requestedLevel = metadata?.security_level || SecurityLevel.STANDARD;
         const effectiveLevel = resolveSecurityLevel(userTier, requestedLevel);
 
-        // Apply Security Context
-        let user = '1000:1000';
         let capAdd: string[] = [];
-        const binds = [`${hostOpenclawDir}:/home/node/.openclaw`];
+        let readonlyRoot = true;
+        let user = 'node';
 
         switch (effectiveLevel) {
-            case SecurityLevel.ROOT:
-                user = '0:0';
-                capAdd = ['SYS_ADMIN', 'NET_ADMIN'];
-                logger.warn(`🚀 Agent ${agentId} starting in ROOT security level (User Tier: ${userTier})`);
+            case SecurityLevel.STANDARD:
+                readonlyRoot = true;
+                capAdd = [];
+                user = 'node';
                 break;
-            case SecurityLevel.SYSADMIN:
-                user = '1000:1000';
+
+            case SecurityLevel.PRO:
+                readonlyRoot = true;
                 capAdd = ['SYS_ADMIN'];
-                logger.info(`🛡️ Agent ${agentId} starting in SYSADMIN security level`);
+                user = 'node';
                 break;
-            case SecurityLevel.SANDBOX:
-            default:
-                user = '1000:1000';
-                logger.info(`🔒 Agent ${agentId} starting in SANDBOX security level`);
+
+            case SecurityLevel.ADVANCED:
+                readonlyRoot = false;
+                capAdd = ['SYS_ADMIN', 'NET_ADMIN'];
+                user = 'root';
                 break;
         }
 
-        // Verify image exists locally or attempt to pull
         try {
             await docker.inspectImage(OPENCLAW_IMAGE);
-        } catch (e: any) {
-            if (e.status === 404) {
-                logger.info(`Image ${OPENCLAW_IMAGE} not found locally. Attempting to pull...`);
-                try {
-                    await docker.pullImage(OPENCLAW_IMAGE);
-                    logger.info(`Successfully pulled image ${OPENCLAW_IMAGE}`);
-                } catch (pullErr: any) {
-                    logger.error(`Failed to pull image ${OPENCLAW_IMAGE}: ${pullErr.message}`);
-                    throw pullErr;
-                }
-            } else {
-                throw e;
-            }
+        } catch {
+            await docker.pullImage(OPENCLAW_IMAGE);
         }
 
-        const newContainer = await docker.createContainer({
+        const commonArgs = ['gateway', '--bind', 'lan', '--allow-unconfigured'];
+
+        const cmd = [
+            'sh',
+            '-c',
+            `cd /app && ${forceDoctor
+                ? `node openclaw.mjs doctor --fix --non-interactive --yes && exec node openclaw.mjs ${commonArgs.join(' ')}`
+                : `exec node openclaw.mjs ${commonArgs.join(' ')}`
+            }`
+        ];
+
+        const container = await docker.createContainer({
             Image: OPENCLAW_IMAGE,
-            User: user,
             name: containerName,
             Env: env,
-            Cmd: ['node', 'dist/index.js', 'gateway', '--bind', 'lan'],
+            Cmd: cmd,
             ExposedPorts: { '18789/tcp': {} },
             HostConfig: {
-                Binds: binds,
+                Binds: [`${homeDir}:/home/node`],
                 PortBindings: { '18789/tcp': [{ HostPort: hostPort.toString() }] },
                 RestartPolicy: { Name: 'unless-stopped' },
-                CapAdd: capAdd
+
+                CapAdd: capAdd,
+                CapDrop: effectiveLevel === SecurityLevel.STANDARD ? ['ALL'] : undefined,
+
+                ReadonlyRootfs: readonlyRoot,
+                User: user,
+
+                SecurityOpt: effectiveLevel === SecurityLevel.STANDARD
+                    ? ['no-new-privileges']
+                    : undefined,
+
+                Tmpfs: effectiveLevel === SecurityLevel.STANDARD
+                    ? { '/tmp': 'rw,noexec,nosuid,size=64m' }
+                    : undefined
             },
             NetworkingConfig: {
                 EndpointsConfig: { [DOCKER_NETWORK_NAME]: {} }
             }
         });
 
-        await newContainer.start();
+        await container.start();
+
+        // Give OpenClaw time to boot
+        await new Promise(r => setTimeout(r, 5000));
+
+        const inspect = await container.inspect();
+
+        if (!inspect.State.Running && !forceDoctor) {
+            logger.warn(`Agent ${agentId} failed boot — retrying with doctor`);
+            return startOpenClawAgent(agentId, config, metadata, true);
+        }
 
         await supabase.from('agent_actual_state').upsert({
             agent_id: agentId,
@@ -221,18 +197,46 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
 
     } catch (err: any) {
         logger.error(`Failed to start OpenClaw agent ${agentId}:`, err.message);
+
         await supabase.from('agent_actual_state').upsert({
             agent_id: agentId,
             status: 'error',
             error_message: err.message
         });
-        throw err; // Re-throw for reconciler to handle retries
+
+        throw err;
     }
 }
+
+export async function runTerminalCommand(agentId: string, command: string): Promise<string> {
+    const containerName = getAgentContainerName(agentId, 'openclaw');
+
+    try {
+        const exec = await docker.createExec(containerName, {
+            AttachStdout: true,
+            AttachStderr: true,
+            Tty: true,
+            WorkingDir: '/home/node',
+            Cmd: ['sh', '-c', command]
+        });
+
+        const result = await docker.startExec(exec.Id, { Detach: false, Tty: true });
+        return typeof result === 'string' ? result : JSON.stringify(result);
+    } catch (err: any) {
+        logger.error(`Terminal Error for ${agentId}:`, err.message);
+        return `Error: ${err.message}`;
+    }
+}
+
 
 export async function stopOpenClawAgent(agentId: string) {
     const containerName = getAgentContainerName(agentId, 'openclaw');
     try {
+        await supabase.from('agent_actual_state').upsert({
+            agent_id: agentId,
+            status: 'stopping'
+        });
+
         const container = await docker.getContainer(containerName);
         console.log(`Stopping container ${containerName}...`);
         await container.stop();
@@ -248,38 +252,14 @@ export async function stopOpenClawAgent(agentId: string) {
         });
     } catch (err: any) {
         logger.warn(`Failed to stop OpenClaw agent ${agentId} (likely already stopped):`, err.message);
-    }
-}
-
-export async function runTerminalCommand(agentId: string, command: string): Promise<string> {
-    const containerName = getAgentContainerName(agentId, 'openclaw');
-    try {
-        // Fetch security level to determine working directory
-        const { data: actual } = await supabase
-            .from('agent_actual_state')
-            .select('effective_security_tier')
-            .eq('agent_id', agentId)
-            .single();
-
-        const securityLevel = parseInt(actual?.effective_security_tier || '0');
-
-        // Allowed to navigate anywhere (restricted by Docker User)
-        const workingDir = securityLevel >= 1 ? '/' : '/home/node/.openclaw';
-
-        const exec = await docker.createExec(containerName, {
-            AttachStdout: true,
-            AttachStderr: true,
-            Tty: true,
-            WorkingDir: workingDir,
-            Cmd: ['sh', '-c', command]
-        });
-
-        logger.info(`OpenClaw: Starting exec ${exec.Id} for command "${command}"...`);
-        const result = await docker.startExec(exec.Id, { Detach: false, Tty: true });
-        logger.info(`OpenClaw: Exec ${exec.Id} finished.`);
-        return typeof result === 'string' ? result : JSON.stringify(result);
-    } catch (err: any) {
-        logger.error(`Terminal Error for ${agentId}:`, err.message);
-        return `Error: ${err.message}`;
+        // Ensure we mark as stopped if the container is gone
+        if (err.message.includes('no such container') || err.message.includes('404')) {
+            await supabase.from('agent_actual_state').upsert({
+                agent_id: agentId,
+                status: 'stopped',
+                endpoint_url: null,
+                last_sync: new Date().toISOString()
+            });
+        }
     }
 }

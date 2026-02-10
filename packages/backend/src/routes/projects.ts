@@ -15,7 +15,7 @@ const projectRoutes: FastifyPluginAsync = async (fastify) => {
             throw error;
         }
 
-        fastify.log.info({ count: data?.length, userId: request.userId }, 'Projects listed for user');
+        fastify.log.debug({ count: data?.length, userId: request.userId }, 'Projects listed for user');
 
         // Map data to include agentCount
         return data.map((p: any) => ({

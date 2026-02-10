@@ -18,8 +18,8 @@ async function main() {
     const limit = parseInt(process.argv[4] || '10');
 
     if (!table) {
-        console.log('Usage: bun run scripts/debug-db.ts <table> [filter_json] [limit]');
-        console.log('Example: bun run scripts/debug-db.ts agents \'{"id": "123"}\'');
+        console.log('Usage: bun run scripts/supabase-utils/debug-db.ts <table> [filter_json] [limit]');
+        console.log('Example: bun run scripts/supabase-utils/debug-db.ts agents \'{"id": "123"}\'');
         return;
     }
 

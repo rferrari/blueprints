@@ -10,6 +10,8 @@ import agentRoutes from './routes/agents';
 import adminRoutes from './routes/admin';
 import feedbackRoutes from './routes/feedback';
 import upgradeFeedbackRoutes from './routes/upgrade-feedback';
+import supportRoutes from './routes/support';
+import rateLimit from '@fastify/rate-limit';
 
 const fastify = Fastify({
     disableRequestLogging: true, // Reduce noise: standard incoming/completed logs moved to debug
@@ -66,9 +68,20 @@ fastify.setErrorHandler((error: any, request, reply) => {
 // Register plugins
 await fastify.register(cors);
 await fastify.register(sensible);
+
+// Rate Limiting
+await fastify.register(rateLimit, {
+    max: 100,
+    timeWindow: '1 minute',
+    keyGenerator: (request) => {
+        // Use session_id if available in body, fallback to IP
+        return (request.body as any)?.session_id || request.ip;
+    },
+    skipOnError: true
+});
 // REMOVED root-level authPlugin registration
 
-// In a real app, use environment variables
+// Use environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
@@ -95,6 +108,7 @@ await fastify.register(async (authenticatedInstance) => {
     authenticatedInstance.register(adminRoutes, { prefix: '/admin' });
     authenticatedInstance.register(feedbackRoutes, { prefix: '/feedback' });
     authenticatedInstance.register(upgradeFeedbackRoutes, { prefix: '/upgrade-feedback' });
+    authenticatedInstance.register(supportRoutes, { prefix: '/support' });
 });
 
 const start = async () => {

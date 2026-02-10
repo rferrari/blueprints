@@ -2,12 +2,12 @@
 
 import React, { useState } from 'react';
 import { createClient } from '@/lib/supabase';
-import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG } from '@eliza-manager/shared';
-import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck, Lock, Unlock } from 'lucide-react';
+import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG, OPENAI_ALLOWED_MODELS } from '@eliza-manager/shared';
+import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck, Lock, Unlock, Plus, User, Activity } from 'lucide-react';
 
 interface OpenClawWizardProps {
     agent: any;
-    onSave: (config: any, metadata?: any) => Promise<void>;
+    onSave: (config: any, metadata?: any, name?: string) => Promise<void>;
     onClose: () => void;
 }
 
@@ -16,14 +16,18 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     const existingConfig = getOne(agent.agent_desired_state)?.config || {};
     const [step, setStep] = useState(1);
     const [saving, setSaving] = useState(false);
-    const [veniceModels, setVeniceModels] = useState<any[]>([]);
+    const [availableModels, setAvailableModels] = useState<any[]>([]);
     const [fetchingModels, setFetchingModels] = useState(false);
     const [modelError, setModelError] = useState<string | null>(null);
+    const [jsonMode, setJsonMode] = useState(false);
+    const [pastedJson, setPastedJson] = useState('');
+    const [name, setName] = useState(agent.name || '');
+    const [avatar, setAvatar] = useState(getOne(agent.agent_desired_state)?.metadata?.avatar || '');
 
     // Tier & Security
     const supabase = createClient();
     const [tier, setTier] = useState<UserTier>(UserTier.FREE);
-    const [securityLevel, setSecurityLevel] = useState<SecurityLevel>(SecurityLevel.SANDBOX);
+    const [securityLevel, setSecurityLevel] = useState<SecurityLevel>(SecurityLevel.STANDARD);
 
     React.useEffect(() => {
         const fetchTier = async () => {
@@ -68,35 +72,63 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         ...existingConfig
     });
 
-    const fetchVeniceModels = async (token: string) => {
+    const fetchModels = async (provider: string, token: string) => {
         if (!token) return;
         setFetchingModels(true);
         setModelError(null);
         try {
-            const res = await fetch('https://api.venice.ai/api/v1/models', {
+            let url = '';
+            if (provider === 'venice') url = 'https://api.venice.ai/api/v1/models';
+            else if (provider === 'openai') url = 'https://api.openai.com/v1/models';
+            else if (provider === 'anthropic') {
+                const models = [
+                    { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+                    { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' },
+                    { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' }
+                ];
+                setAvailableModels(models);
+                if (!config.modelId || !models.find((m: any) => m.id === config.modelId)) {
+                    setConfig((prev: any) => ({ ...prev, modelId: models[0].id }));
+                }
+                setFetchingModels(false);
+                return;
+            }
+
+            if (!url) {
+                setFetchingModels(false);
+                return;
+            }
+
+            const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (!res.ok) throw new Error('Failed to fetch models (Unauthorized/Invalid Key)');
+            if (!res.ok) throw new Error(`Failed to fetch models: ${res.statusText}`);
             const data = await res.json();
-            // Venice returns { data: [{ id: "...", ... }] }
+
             if (data?.data && Array.isArray(data.data)) {
-                // Filter to only models that support function calling, then sort by name
-                const functionCallingModels = data.data
-                    .filter((m: any) => m.model_spec?.capabilities?.supportsFunctionCalling === true)
-                    .sort((a: any, b: any) => {
-                        const nameA = (a.model_spec?.name || a.id).toLowerCase();
-                        const nameB = (b.model_spec?.name || b.id).toLowerCase();
-                        return nameA.localeCompare(nameB);
-                    });
-                setVeniceModels(functionCallingModels);
-                // If current modelId is not in the list, or we want to suggest one
-                if (!config.modelId || !functionCallingModels.find((m: any) => m.id === config.modelId)) {
-                    const defaultModel = functionCallingModels.find((m: any) => m.id.includes('70b')) || functionCallingModels[0];
+                let models: any[] = [];
+                if (provider === 'venice') {
+                    models = data.data
+                        .filter((m: any) => m.model_spec?.capabilities?.supportsFunctionCalling === true)
+                        .map((m: any) => ({ id: m.id, name: m.model_spec?.name || m.id }));
+                } else if (provider === 'openai') {
+                    models = data.data
+                        .filter((m: any) => OPENAI_ALLOWED_MODELS.has(m.id))
+                        .map((m: any) => ({ id: m.id, name: m.id }));
+                } else {
+                    models = data.data.map((m: any) => ({ id: m.id, name: m.id }));
+                }
+
+                models.sort((a: any, b: any) => a.name.localeCompare(b.name));
+                setAvailableModels(models);
+
+                if (!config.modelId || !models.find(m => m.id === config.modelId)) {
+                    const defaultModel = models.find(m => m.id.includes('70b') || m.id.includes('gpt-4o')) || models[0];
                     if (defaultModel) setConfig((prev: any) => ({ ...prev, modelId: defaultModel.id }));
                 }
             }
         } catch (err: any) {
-            console.error('Venice model fetch error:', err);
+            console.error('Fetch models error:', err);
             setModelError(err.message);
         } finally {
             setFetchingModels(false);
@@ -104,13 +136,13 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     };
 
     const steps = [
-        { id: 1, title: 'Intelligence Provider', icon: <Zap size={20} /> },
-        { id: 2, title: 'Neural Credentials', icon: <Key size={20} /> },
-        { id: 3, title: 'Model Selection', icon: <Cpu size={20} />, hidden: config.provider !== 'venice' },
+        { id: 1, title: 'Neural Identity', icon: <User size={20} /> },
+        { id: 2, title: 'Intelligence Provider', icon: <Zap size={20} /> },
+        { id: 3, title: 'Model Selection', icon: <Cpu size={20} /> },
         { id: 4, title: 'Permissions & Security', icon: <Shield size={20} /> },
         { id: 5, title: 'Communication Channels', icon: <Share2 size={20} /> },
         { id: 6, title: 'Channel Configuration', icon: <MessageSquare size={20} /> },
-    ].filter(s => !s.hidden);
+    ];
 
     const handleSave = async () => {
         setSaving(true);
@@ -132,16 +164,22 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
             if (config.provider === 'anthropic') {
                 modelId = config.modelId || 'claude-3-5-sonnet-latest';
-                modelName = 'Claude 3.5 Sonnet';
+                const found = availableModels.find((m: any) => m.id === modelId);
+                modelName = found ? found.name || modelId : 'Claude 3.5 Sonnet';
                 modelApi = 'anthropic-messages';
                 baseUrl = 'https://api.anthropic.com';
             } else if (config.provider === 'venice') {
                 modelId = config.modelId || 'llama-3.3-70b';
-                // Try to find the model name from fetched list
-                const found = veniceModels.find(m => m.id === modelId);
-                modelName = found ? found.name || modelId : 'Llama 3.3 70B (Venice)';
+                const found = availableModels.find((m: any) => m.id === modelId);
+                modelName = found ? found.name || modelId : 'Venice Model';
                 modelApi = 'openai-completions';
                 baseUrl = 'https://api.venice.ai/api/v1';
+            } else if (config.provider === 'openai') {
+                modelId = config.modelId || 'gpt-4o';
+                const found = availableModels.find((m: any) => m.id === modelId);
+                modelName = found ? found.name || modelId : 'OpenAI Model';
+                modelApi = 'openai-responses';
+                baseUrl = 'https://api.openai.com/v1';
             } else if (config.provider === 'blueprint_shared') {
                 modelId = 'blueprint/shared-model';
                 modelName = 'Blueprint Managed Intelligence';
@@ -211,12 +249,24 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                 }
             };
 
-            await onSave(finalConfig, { security_level: securityLevel });
+            await onSave(finalConfig, { security_level: securityLevel, avatar }, name);
             onClose();
         } catch (err) {
             console.error('Failed to save OpenClaw config:', err);
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleImportJson = () => {
+        try {
+            const parsed = JSON.parse(pastedJson);
+            // Derive config from parsed JSON
+            setConfig((prev: any) => ({ ...prev, ...parsed }));
+            setJsonMode(false); // Switch back to wizard populated with JSON data
+            // If the JSON had model info, etc, it will be reflected in later steps
+        } catch (err: any) {
+            alert('Invalid JSON: ' + err.message);
         }
     };
 
@@ -254,14 +304,99 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
                     <div className="min-h-[300px] animate-in slide-in-from-right-4 duration-300">
                         {step === 1 && (
+                            <div className="space-y-8">
+                                {!jsonMode ? (
+                                    <>
+                                        <div className="space-y-6">
+                                            <div className="flex flex-col gap-6 items-center">
+                                                <div className="size-32 rounded-3xl bg-white/5 border-4 border-white/10 overflow-hidden relative group/avatar shadow-2xl">
+                                                    {avatar ? (
+                                                        <img src={avatar} className="w-full h-full object-cover" alt="Agent Avatar" />
+                                                    ) : (
+                                                        <div className="w-full h-full flex items-center justify-center text-white/10 bg-gradient-to-br from-white/5 to-transparent">
+                                                            <User size={48} />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="w-full space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-black uppercase tracking-widest text-primary">Identity Callsign</label>
+                                                        <input
+                                                            type="text"
+                                                            value={name}
+                                                            onChange={(e) => setName(e.target.value)}
+                                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-bold text-lg focus:border-primary outline-none transition-all placeholder:text-white/10"
+                                                            placeholder="Ghost in the Shell..."
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Avatar Visualization (URL)</label>
+                                                        <input
+                                                            type="text"
+                                                            value={avatar}
+                                                            onChange={(e) => setAvatar(e.target.value)}
+                                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 text-sm focus:border-primary outline-none transition-all placeholder:text-white/10"
+                                                            placeholder="https://images.unsplash.com/photo..."
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="relative py-4">
+                                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
+                                            <div className="relative flex justify-center text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/30"><span className="bg-slate-950 px-4">OR</span></div>
+                                        </div>
+
+                                        <button
+                                            onClick={() => setJsonMode(true)}
+                                            className="w-full p-6 rounded-3xl border border-dashed border-white/10 bg-white/[0.02] hover:bg-white/[0.05] transition-all flex items-center justify-center gap-4 group"
+                                        >
+                                            <Terminal size={20} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                                            <div className="text-left">
+                                                <h4 className="font-black text-[10px] uppercase tracking-widest text-muted-foreground group-hover:text-white transition-colors">Direct Matrix Injection</h4>
+                                                <p className="text-[10px] text-muted-foreground/40 font-medium italic">Paste raw OpenClaw JSON configuration</p>
+                                            </div>
+                                        </button>
+                                    </>
+                                ) : (
+                                    <div className="space-y-6">
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-[10px] font-black uppercase tracking-widest text-primary">Neural Matrix JSON</label>
+                                            <button onClick={() => setJsonMode(false)} className="text-[10px] font-black uppercase text-muted-foreground hover:text-white">Back to Wizard</button>
+                                        </div>
+                                        <textarea
+                                            value={pastedJson}
+                                            onChange={(e) => setPastedJson(e.target.value)}
+                                            rows={12}
+                                            className="w-full bg-black/40 border border-white/10 rounded-3xl p-6 font-mono text-[10px] focus:border-primary outline-none transition-all custom-scrollbar h-[350px]"
+                                            placeholder={`{
+  "auth": { ... },
+  "gateway": { ... },
+  "channels": { ... }
+}`}
+                                        />
+                                        <button
+                                            onClick={handleImportJson}
+                                            disabled={!pastedJson}
+                                            className="w-full py-4 rounded-2xl bg-primary text-white font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-xl shadow-primary/20"
+                                        >
+                                            <Activity size={16} /> Synchronize Neural Matrix
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {step === 2 && (
                             <div className="space-y-6">
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Choose the primary intelligence source for **{agent.name}**.
+                                    Choose the primary intelligence source for **{name || agent.name}**.
                                 </p>
                                 <div className="grid grid-cols-1 gap-4">
                                     {[
+                                        { id: 'blueprint_shared', name: 'BlueprintS Shared', desc: 'Free tier community intelligence (Rate Limited).', icon: <Share2 className="text-blue-400" /> },
                                         { id: 'venice', name: 'Venice AI', desc: 'Uncensored, private, and high-performance.', icon: <Cpu className="text-purple-400" /> },
-                                        { id: 'blueprint_shared', name: 'Blueprint Shared', desc: 'Free tier community intelligence (Rate Limited).', icon: <Share2 className="text-blue-400" /> },
                                         { id: 'anthropic', name: 'Anthropic Claude', desc: 'Optimized for reasoning and coding.', icon: <Bot className="text-orange-500" /> },
                                         { id: 'openai', name: 'OpenAI GPT', desc: 'Fast, reliable, and versatile.', icon: <Zap className="text-green-500" /> },
                                     ].map(p => (
@@ -296,9 +431,9 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                             <div>
                                                 <h4 className="font-bold text-sm text-blue-100 mb-2">Managed Access</h4>
                                                 <p className="text-xs text-blue-200/60 leading-relaxed">
-                                                    You are using the Blueprint Community shared pool. Access is granted via your neural identity signature. No manual API key is required.
+                                                    You are using the Blueprint Community shared pool. No manual API key is required.
                                                 </p>
-                                                <div className="mt-4 flex items-center gap-2 text-[10px] font-mono text-blue-300">
+                                                <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-blue-300">
                                                     <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Rate Limits Active
                                                 </div>
                                             </div>
@@ -329,10 +464,10 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                             <div className="space-y-6">
                                 <div className="flex items-center justify-between">
                                     <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                        Select the neural model for **{agent.name}**.
+                                        Select the neural model for **{name || agent.name}**.
                                     </p>
                                     <button
-                                        onClick={() => fetchVeniceModels(config.token)}
+                                        onClick={() => fetchModels(config.provider, config.token)}
                                         className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
                                     >
                                         <Zap size={12} /> Refresh List
@@ -342,7 +477,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                 {fetchingModels ? (
                                     <div className="h-[200px] flex flex-col items-center justify-center gap-4 bg-white/5 rounded-3xl border border-white/5 animate-pulse">
                                         <Loader2 size={32} className="animate-spin text-primary" />
-                                        <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Synchronizing with Venice Registry...</p>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Synchronizing with Provider Registry...</p>
                                     </div>
                                 ) : modelError ? (
                                     <div className="p-6 rounded-3xl border border-red-500/20 bg-red-500/5 text-center space-y-4">
@@ -356,7 +491,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                                        {veniceModels.map(m => (
+                                        {availableModels.map((m: any) => (
                                             <button
                                                 key={m.id}
                                                 onClick={() => setConfig({ ...config, modelId: m.id })}
@@ -380,27 +515,27 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step === 4 && (
                             <div className="space-y-6">
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Configure the operating privileges for **{agent.name}**. Higher levels require higher User Tiers.
+                                    Configure the operating privileges for **{name || agent.name}**. Higher levels require higher User Tiers.
                                 </p>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {[
                                         {
-                                            level: SecurityLevel.SANDBOX,
-                                            title: 'Sandbox',
+                                            level: SecurityLevel.STANDARD,
+                                            title: 'Standard',
                                             icon: <Shield size={24} className="text-green-400" />,
-                                            desc: 'Standard isolation. Safe for all agents.'
+                                            desc: 'Workspace access and read-only system.'
                                         },
                                         {
-                                            level: SecurityLevel.SYSADMIN,
-                                            title: 'Privileged',
+                                            level: SecurityLevel.PRO,
+                                            title: 'Professional',
                                             icon: <Lock size={24} className="text-amber-400" />,
-                                            desc: 'Access to system calls and docker socket.'
+                                            desc: 'Read-only system access with limited privileges.'
                                         },
                                         {
-                                            level: SecurityLevel.ROOT,
-                                            title: 'Host / Root',
+                                            level: SecurityLevel.ADVANCED,
+                                            title: 'Advanced',
                                             icon: <Unlock size={24} className="text-red-500" />,
-                                            desc: 'Full host network and root access. Dangerous.'
+                                            desc: 'Full container access with elevated privileges.'
                                         }
                                     ].map((opt) => {
                                         const allowed = resolveSecurityLevel(tier, opt.level) === opt.level;
@@ -446,7 +581,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step === 5 && (
                             <div className="space-y-8">
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Select which communication channels <strong>{agent.name}</strong> should be available on.
+                                    Select which communication channels <strong>{name || agent.name}</strong> should be available on.
                                 </p>
                                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                                     {[
@@ -553,10 +688,11 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step > 1 && (
                             <button
                                 onClick={() => {
-                                    if (step === 4 && config.provider !== 'venice') setStep(2);
-                                    else setStep(step - 1);
+                                    if (step === 1) return;
+                                    setStep(step - 1);
                                 }}
-                                className="px-8 py-4 rounded-2xl border border-white/10 hover:bg-white/5 transition-all font-black text-[10px] uppercase tracking-widest flex items-center gap-2"
+                                disabled={step === 1}
+                                className="px-8 py-4 rounded-2xl border border-white/10 hover:bg-white/5 transition-all font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-20"
                             >
                                 <ArrowLeft size={16} /> Back
                             </button>
@@ -564,18 +700,14 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step < steps[steps.length - 1].id ? (
                             <button
                                 onClick={() => {
-                                    if (step === 2) {
-                                        if (config.provider === 'venice') {
-                                            fetchVeniceModels(config.token);
-                                            setStep(3);
-                                        } else {
-                                            setStep(4);
-                                        }
+                                    if (step === 2 && config.provider !== 'blueprint_shared') {
+                                        fetchModels(config.provider, config.token);
+                                        setStep(3);
                                     } else {
                                         setStep(step + 1);
                                     }
                                 }}
-                                disabled={step === 2 && config.provider !== 'blueprint_shared' && !config.token}
+                                disabled={(step === 2 && config.provider !== 'blueprint_shared' && !config.token)}
                                 className="flex-1 py-4 rounded-2xl bg-white text-black hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 Continue <ArrowRight size={16} />

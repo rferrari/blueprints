@@ -58,4 +58,3 @@ echo "🧹 Cleaning up..."
 rm -rf "$TARGET_DIR"
 
 echo "✅ OpenClaw image is ready!"
-echo "You can now run 'docker compose up -d' and the worker will be able to start agents."

@@ -160,7 +160,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
     // Update agent configuration (desired state)
     fastify.patch('/:agentId/config', async (request) => {
         const { agentId } = request.params as { agentId: string };
-        const { enabled, config, metadata, purge_at } = UpdateAgentConfigSchema.parse(request.body);
+        const { enabled, config, metadata, purge_at, name } = UpdateAgentConfigSchema.parse(request.body);
 
         // Verify agent ownership via project
         const { data: agent } = await fastify.supabase
@@ -187,6 +187,18 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
         if (purge_at !== undefined) {
             fastify.log.debug({ agentId, purge_at }, 'Processing purge_at update');
             updates.purge_at = purge_at;
+        }
+
+        if (name !== undefined) {
+            fastify.log.info({ agentId, name }, 'Updating agent name in agents table');
+            const { error: nameError } = await fastify.supabase
+                .from('agents')
+                .update({ name })
+                .eq('id', agentId);
+            if (nameError) {
+                fastify.log.error({ nameError, agentId, name }, 'Failed to update agent name');
+                throw nameError;
+            }
         }
 
         fastify.log.debug({ agentId, updates }, 'Executing desired state update');

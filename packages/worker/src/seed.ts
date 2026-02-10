@@ -17,7 +17,7 @@ async function seed() {
     const localRuntime = {
         name: 'Local Eliza Runtime',
         eliza_api_url: 'http://localhost:3000/api', // Default ElizaOS port
-        auth_token: 'secret-token' // In a real app, this should match ElizaOS config
+        auth_token: 'secret-token' // this should match ElizaOS config
     };
 
     const { data, error } = await supabase

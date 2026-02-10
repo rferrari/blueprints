@@ -64,4 +64,7 @@ done
 echo ""
 echo "========================================================"
 echo "✅ Blueprints setup process completed!"
+echo "You can now run:
+echo "'docker compose up -d'"
+echo " and the worker will be able to start agents."
 echo "========================================================"

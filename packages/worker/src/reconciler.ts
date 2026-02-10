@@ -115,7 +115,8 @@ export async function reconcile() {
                     }
 
                     if (agent.framework === 'openclaw') {
-                        await startOpenClawAgent(agent.id, desired.config, desired.metadata);
+                        const forceDoctor = currentFailCount > 0;
+                        await startOpenClawAgent(agent.id, desired.config, desired.metadata, forceDoctor);
                     } else {
                         await startElizaAgent(agent.id, desired.config);
                     }

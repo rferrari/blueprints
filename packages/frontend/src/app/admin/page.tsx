@@ -7,7 +7,7 @@ import {
     LayoutDashboard, Users, Bot, Zap, Shield,
     ArrowLeft, Loader2, RefreshCw, AlertTriangle,
     TrendingUp, Activity, Terminal, MessageSquare, Star,
-    CreditCard, Wallet, Clock, Rocket, BarChart3, X
+    CreditCard, Wallet, Clock, Rocket, BarChart3, X, LifeBuoy
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -31,6 +31,9 @@ export default function AdminDashboard() {
     const [modalLoading, setModalLoading] = useState(false);
     const [editingUserId, setEditingUserId] = useState<string | null>(null);
     const [editingTier, setEditingTier] = useState<string>('free');
+    const [allAgents, setAllAgents] = useState<any[]>([]);
+    const [supportAgentId, setSupportAgentId] = useState<string | null>(null);
+    const [isSavingSupport, setIsSavingSupport] = useState(false);
     const supabase = createClient();
     const router = useRouter();
 
@@ -65,6 +68,23 @@ export default function AdminDashboard() {
             if (uRes.ok) {
                 setUpgradeFeedbacks(await uRes.json());
             }
+
+            // Fetch Support Agent Assignment
+            const sRes = await fetch(`${API_URL}/admin/support-agent`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (sRes.ok) {
+                const sData = await sRes.json();
+                setSupportAgentId(sData.agent_id);
+            }
+
+            // Fetch All Agents for dropdown
+            const aRes = await fetch(`${API_URL}/admin/agents`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (aRes.ok) {
+                setAllAgents(await aRes.json());
+            }
         } catch (err: any) {
             console.error('AdminDashboard Error:', err);
             setError(err.message);
@@ -93,6 +113,30 @@ export default function AdminDashboard() {
             console.error(err);
         } finally {
             setIsDeploying(false);
+        }
+    };
+
+    const handleSaveSupportAgent = async (agentId: string) => {
+        setIsSavingSupport(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch(`${API_URL}/admin/support-agent`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${session?.access_token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ agent_id: agentId })
+            });
+
+            if (res.ok) {
+                setSupportAgentId(agentId);
+                alert('Support Agent assigned successfully.');
+            }
+        } catch (err) {
+            console.error('Failed to save support agent:', err);
+        } finally {
+            setIsSavingSupport(false);
         }
     };
 
@@ -211,7 +255,7 @@ export default function AdminDashboard() {
                             <Link href="/dashboard" className="p-2 hover:bg-white/5 rounded-xl transition-colors text-muted-foreground">
                                 <ArrowLeft size={20} />
                             </Link>
-                            <h1 className="text-4xl font-black tracking-tighter uppercase">Super <span className="text-primary">Agent </span> Dashboard</h1>
+                            <h1 className="text-4xl font-black tracking-tighter uppercase">Architect's<span className="text-primary">Room</span></h1>
                         </div>
                         <p className="text-muted-foreground font-medium ml-12">Global system oversight and autonomous agent control.</p>
                     </div>
@@ -298,6 +342,28 @@ export default function AdminDashboard() {
                                 </div>
                                 <p className="text-[10px] text-muted-foreground font-medium">Initialize root-level administrative intelligence.</p>
                             </button>
+                            <div className="p-6 rounded-2xl bg-white/5 border border-white/5 space-y-4">
+                                <div className="flex items-center gap-3">
+                                    <LifeBuoy size={18} className="text-amber-400" />
+                                    <span className="font-black text-xs uppercase tracking-widest text-white">Support Proxy</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <select
+                                        className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-xs font-bold text-white outline-none focus:border-primary/50 transition-colors"
+                                        value={supportAgentId || ''}
+                                        onChange={(e) => handleSaveSupportAgent(e.target.value)}
+                                        disabled={isSavingSupport}
+                                    >
+                                        <option value="" disabled>Select Support Agent</option>
+                                        {allAgents.map(a => (
+                                            <option key={a.id} value={a.id}>{a.name} ({a.framework})</option>
+                                        ))}
+                                    </select>
+                                    {isSavingSupport && <Loader2 size={16} className="animate-spin self-center" />}
+                                </div>
+                                <p className="text-[10px] text-muted-foreground font-medium">Designate an official agent for user support transmissions.</p>
+                            </div>
+
                             <button className="w-full p-6 rounded-2xl bg-white/5 border border-white/5 text-left hover:bg-white/10 transition-all group">
                                 <div className="flex items-center gap-3 mb-2">
                                     <Users size={18} className="text-muted-foreground group-hover:text-white transition-colors" />
@@ -604,6 +670,6 @@ export default function AdminDashboard() {
                     )}
                 </DialogContent>
             </Dialog>
-        </div>
+        </div >
     );
 }

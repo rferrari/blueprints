@@ -55,7 +55,8 @@ export const docker = {
             inspect: () => this._request('GET', `/containers/${name}/json`),
             start: () => this._request('POST', `/containers/${name}/start`),
             stop: () => this._request('POST', `/containers/${name}/stop`),
-            remove: () => this._request('DELETE', `/containers/${name}?v=true&force=true`)
+            remove: () => this._request('DELETE', `/containers/${name}?v=true&force=true`),
+            wait: () => this._request('POST', `/containers/${name}/wait`)
         };
     },
 

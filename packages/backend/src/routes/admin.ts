@@ -343,6 +343,35 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
 
         return { message: 'Emergency stop protocol initiated. All agents set to disabled.' };
     });
+
+    // Support Agent Management
+    fastify.get('/support-agent', async () => {
+        const { data, error } = await fastify.supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'support_agent_id')
+            .single();
+
+        if (error && error.code !== 'PGRST116') throw error;
+        return data?.value || { agent_id: null };
+    });
+
+    fastify.post<{ Body: { agent_id: string } }>('/support-agent', async (request) => {
+        const { agent_id } = request.body;
+
+        const { data, error } = await fastify.supabase
+            .from('system_settings')
+            .upsert({
+                key: 'support_agent_id',
+                value: { agent_id },
+                updated_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+        return { success: true, agent_id: data.value.agent_id };
+    });
 };
 
 export default adminRoutes;

@@ -4,6 +4,8 @@ import { supabase } from './lib/supabase';
 import { logger } from './lib/logger';
 import { cryptoUtils } from './lib/crypto';
 import { runTerminalCommand } from './handlers/openclaw';
+import { runTerminalCommand as runOpenClawTerminal } from './handlers/openclaw';
+import { runElizaCommand } from './handlers/eliza';
 
 const isDocker = fs.existsSync('/.dockerenv');
 
@@ -12,6 +14,14 @@ export async function handleUserMessage(payload: any) {
     const content = (rawContent || '').trim();
 
     logger.info(`Message Bus: [${id}] Processing message for agent ${agent_id}: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`);
+
+    // Get agent's desired state (for framework and config)
+    const { data: agent } = await supabase
+        .from('agents')
+        .select('framework')
+        .eq('id', agent_id)
+        .single();
+
 
     try {
         // --- Terminal Tool Logic ---
@@ -31,17 +41,63 @@ export async function handleUserMessage(payload: any) {
             }
 
             logger.info(`Message Bus: [${id}] Calling runTerminalCommand for ${command}...`);
-            const output = await runTerminalCommand(agent_id, command);
-            logger.info(`Message Bus: [${id}] runTerminalCommand finished. Output length: ${output.length}`);
 
-            await supabase.from('agent_conversations').insert([{
-                agent_id,
-                user_id,
-                // content: `\`\`\`bash\n$ ${command}\n\n${output}\n\`\`\``,
-                content: `$ ${command}\n\n${output}`,
-                sender: 'agent'
-            }]);
-            return;
+            if (content === '/terminal' || content.startsWith('/terminal ')) {
+                const command = content === '/terminal'
+                    ? 'help'
+                    : content.replace('/terminal ', '').trim();
+
+                if (command === 'help' || !command) {
+                    await supabase.from('agent_conversations').insert([{
+                        agent_id,
+                        user_id,
+                        content:
+                            `🖥️ Terminal Command Center
+
+Commands prefixed with /terminal are executed inside the agent container.
+
+Examples:
+
+/terminal ls
+/terminal whoami
+/terminal node -v
+/terminal ls
+
+`,
+                        sender: 'agent'
+                    }]);
+                    return;
+                }
+
+                let output = '';
+
+                if (agent?.framework === 'eliza') {
+                    output = await runElizaCommand(agent_id, command);
+                } else {
+                    output = await runOpenClawTerminal(agent_id, command);
+                }
+
+                await supabase.from('agent_conversations').insert([{
+                    agent_id,
+                    user_id,
+                    content: `$ ${command}\n\n${output}`,
+                    sender: 'agent'
+                }]);
+
+                // return;
+
+
+
+                logger.info(`Message Bus: [${id}] runTerminalCommand finished. Output length: ${output.length}`);
+
+                await supabase.from('agent_conversations').insert([{
+                    agent_id,
+                    user_id,
+                    content: `$ ${command}\n\n${output}`,
+                    sender: 'agent'
+                }]);
+                return;
+            }
         }
 
         logger.info(`Message Bus: [${id}] Standard chat routing for agent ${agent_id}`);
@@ -54,12 +110,6 @@ export async function handleUserMessage(payload: any) {
             .eq('agent_id', agent_id)
             .single();
 
-        // 2. Get agent's desired state (for framework and config)
-        const { data: agent } = await supabase
-            .from('agents')
-            .select('framework')
-            .eq('id', agent_id)
-            .single();
 
         if (!actual?.endpoint_url || !agent) {
             logger.warn(`Message Bus: Agent ${agent_id} not ready or not found.`);

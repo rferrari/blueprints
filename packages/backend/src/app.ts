@@ -81,7 +81,7 @@ await fastify.register(rateLimit, {
 });
 // REMOVED root-level authPlugin registration
 
-// In a real app, use environment variables
+// Use environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 

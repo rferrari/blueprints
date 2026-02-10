@@ -7,106 +7,145 @@ import { getAgentContainerName, renameKey } from '../lib/utils';
 import { DOCKER_NETWORK_NAME, ELIZA_IMAGE_BASE } from '../lib/constants';
 import { cryptoUtils } from '../lib/crypto';
 
+function getAgentWorkspace(agentId: string) {
+    const root = process.env.HOST_WORKSPACES_PATH;
+    if (!root) throw new Error('HOST_WORKSPACES_PATH not set');
+
+    return path.join(root, 'workspaces', agentId);
+}
+
 export async function startElizaAgent(agentId: string, config: any) {
-    logger.info(`Starting Eliza agent ${agentId}...`);
+    logger.info(`Starting Eliza agent ${agentId}`);
+
+    await supabase.from('agent_actual_state').upsert({
+        agent_id: agentId,
+        status: 'starting'
+    });
+
+    const containerName = getAgentContainerName(agentId, 'eliza');
 
     try {
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'starting'
-        });
+        const existing = await docker.getContainer(containerName);
+        const info = await existing.inspect();
 
-        const containerName = getAgentContainerName(agentId, 'eliza');
-        const container = await docker.getContainer(containerName);
-
-        try {
-            const info = await container.inspect();
-            if (info.State.Status === 'running') {
-                logger.info(`Eliza Container ${containerName} already running. Attempting hot-reload...`);
-                await hotReloadEliza(agentId, config);
-                await supabase.from('agent_actual_state').upsert({
-                    agent_id: agentId,
-                    status: 'running',
-                    last_sync: new Date().toISOString()
-                });
-                return;
-            }
-            await container.remove();
-        } catch (e) { }
-
-        const decrypted = cryptoUtils.decryptConfig(config);
-
-        // Feature: Lore -> Knowledge transition
-        const finalConfig = renameKey(decrypted, 'lore', 'knowledge');
-
-        const projectRoot = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'));
-        const workspacePath = path.join(projectRoot, 'workspaces', agentId);
-        if (!fs.existsSync(workspacePath)) fs.mkdirSync(workspacePath, { recursive: true });
-
-        const characterPath = path.join(workspacePath, 'character.json');
-        fs.writeFileSync(characterPath, JSON.stringify(finalConfig, null, 2));
-
-        const hostWorkspacesPath = process.env.HOST_WORKSPACES_PATH;
-        let hostCharacterPath = characterPath;
-
-        if (hostWorkspacesPath) {
-            const resolvedHostWorkspaces = path.isAbsolute(hostWorkspacesPath)
-                ? hostWorkspacesPath
-                : path.resolve(projectRoot, hostWorkspacesPath);
-            hostCharacterPath = path.join(resolvedHostWorkspaces, agentId, 'character.json');
+        if (info.State.Status === 'running') {
+            await hotReloadEliza(agentId, config);
+            return;
         }
 
-        // Verify image exists locally or attempt to pull
-        try {
-            await docker.inspectImage(ELIZA_IMAGE_BASE);
-        } catch (e: any) {
-            if (e.status === 404) {
-                logger.info(`Image ${ELIZA_IMAGE_BASE} not found locally. Attempting to pull...`);
-                try {
-                    await docker.pullImage(ELIZA_IMAGE_BASE);
-                    logger.info(`Successfully pulled image ${ELIZA_IMAGE_BASE}`);
-                } catch (pullErr: any) {
-                    logger.error(`Failed to pull image ${ELIZA_IMAGE_BASE}: ${pullErr.message}`);
-                    throw pullErr;
-                }
-            } else {
-                throw e;
+        await existing.remove();
+    } catch { }
+
+    const decrypted = cryptoUtils.decryptConfig(config);
+    const finalConfig = renameKey(decrypted, 'lore', 'knowledge');
+
+    // === shared workspace ===
+    const agentWorkspace = getAgentWorkspace(agentId);
+    fs.mkdirSync(agentWorkspace, { recursive: true });
+
+    const characterPath = path.join(agentWorkspace, 'character.json');
+    fs.writeFileSync(characterPath, JSON.stringify(finalConfig, null, 2));
+
+    // Ensure image
+    try {
+        await docker.inspectImage(ELIZA_IMAGE_BASE);
+    } catch {
+        await docker.pullImage(ELIZA_IMAGE_BASE);
+    }
+
+    await docker.createContainer({
+        Image: ELIZA_IMAGE_BASE,
+        name: containerName,
+        User: '1000:1000',
+
+        Cmd: [
+            'elizaos',
+            'start',
+            `/agents/${agentId}/character.json`
+        ],
+
+        Env: [`AGENT_ID=${agentId}`],
+
+        HostConfig: {
+            Binds: [
+                `${agentWorkspace}:/agents/${agentId}`
+            ],
+            RestartPolicy: { Name: 'unless-stopped' }
+        },
+
+        NetworkingConfig: {
+            EndpointsConfig: {
+                [DOCKER_NETWORK_NAME]: {}
             }
         }
+    });
 
-        await docker.createContainer({
-            Image: ELIZA_IMAGE_BASE,
-            User: '1000:1000',
-            name: containerName,
-            Env: [`AGENT_ID=${agentId}`],
-            HostConfig: {
-                Binds: [`${hostCharacterPath}:/home/node/app/characters/character.json`],
-                RestartPolicy: { Name: 'unless-stopped' }
-            },
-            NetworkingConfig: {
-                EndpointsConfig: { [DOCKER_NETWORK_NAME]: {} }
-            }
+    const container = await docker.getContainer(containerName);
+    await container.start();
+
+    await supabase.from('agent_actual_state').upsert({
+        agent_id: agentId,
+        status: 'running',
+        last_sync: new Date().toISOString()
+    });
+}
+
+export async function hotReloadEliza(agentId: string, config: any) {
+    const containerName = getAgentContainerName(agentId, 'eliza');
+
+    const decrypted = cryptoUtils.decryptConfig(config);
+    const finalConfig = renameKey(decrypted, 'lore', 'knowledge');
+
+    const agentWorkspace = getAgentWorkspace(agentId);
+    const characterPath = path.join(agentWorkspace, 'character.json');
+
+    fs.writeFileSync(characterPath, JSON.stringify(finalConfig, null, 2));
+
+    const exec = await docker.createExec(containerName, {
+        Cmd: ['elizaos', 'reload'],
+        AttachStdout: true,
+        AttachStderr: true
+    });
+
+    await docker.startExec(exec.Id, {
+        Detach: false,
+        Tty: true
+    });
+
+
+    logger.info(`Eliza ${agentId} reloaded`);
+}
+
+export async function runElizaCommand(agentId: string, command: string): Promise<string> {
+    const containerName = getAgentContainerName(agentId, 'eliza');
+
+    try {
+        const exec = await docker.createExec(containerName, {
+            AttachStdout: true,
+            AttachStderr: true,
+            Tty: true,
+
+            // Run through shell so users can chain commands
+            Cmd: ['sh', '-c', command]
         });
 
-        const newContainer = await docker.getContainer(containerName);
-        await newContainer.start();
+        logger.info(`Eliza: Exec ${exec.Id} → ${command}`);
 
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'running',
-            last_sync: new Date().toISOString()
+        const result = await docker.startExec(exec.Id, {
+            Detach: false,
+            Tty: true
         });
+
+        return typeof result === 'string'
+            ? result
+            : JSON.stringify(result);
 
     } catch (err: any) {
-        logger.error(`Failed to start Eliza agent ${agentId}:`, err.message);
-        await supabase.from('agent_actual_state').upsert({
-            agent_id: agentId,
-            status: 'error',
-            error_message: err.message
-        });
-        throw err; // Re-throw for reconciler to handle retries
+        logger.error(`Eliza terminal error for ${agentId}:`, err.message);
+        return `Error: ${err.message}`;
     }
 }
+
 
 export async function stopElizaAgent(agentId: string) {
     const containerName = getAgentContainerName(agentId, 'eliza');
@@ -137,35 +176,5 @@ export async function stopElizaAgent(agentId: string) {
                 last_sync: new Date().toISOString()
             });
         }
-    }
-}
-
-/**
- * Performs a hot-reload of an Eliza agent's configuration.
- * Uses ElizaOS CLI tools to reload without container restart.
- */
-export async function hotReloadEliza(agentId: string, config: any) {
-    const containerName = getAgentContainerName(agentId, 'eliza');
-    try {
-        const decrypted = cryptoUtils.decryptConfig(config);
-        const finalConfig = renameKey(decrypted, 'lore', 'knowledge');
-
-        const workspacePath = path.resolve(process.cwd(), (process.cwd().includes('packages') ? '../../' : './'), 'workspaces', agentId);
-        const characterPath = path.join(workspacePath, 'character.json');
-
-        logger.info(`Hot-Reload: Updating character config for ${agentId}...`);
-        fs.writeFileSync(characterPath, JSON.stringify(finalConfig, null, 2));
-
-        // Execute reload command inside container
-        // Assuming elizaos cli has a reload command or we restart the internal process
-        const exec = await docker.createExec(containerName, {
-            Cmd: ['sh', '-c', 'pm2 restart all || pkill -f node'] // Fallback to process restart if pm2 not used
-        });
-        await docker.startExec(exec.Id, { Detach: true });
-
-        logger.info(`Hot-Reload: Command sent to Eliza container ${containerName}`);
-    } catch (err: any) {
-        logger.error(`Hot-Reload Failed for ${agentId}:`, err.message);
-        throw err;
     }
 }

@@ -44,8 +44,5 @@ fi
 
 # 4. Success
 echo ""
-echo "✅ VPS is ready for Blueprints!"
 echo "Next steps:"
-echo "1. Upload your code to this server."
-echo "2. Create a .env file with your SUPABASE and ENCRYPTION_KEY variables."
-
+echo "1. Create a .env file with your SUPABASE and ENCRYPTION_KEY variables."

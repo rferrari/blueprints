@@ -60,11 +60,16 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
                 logger.info(`Container ${containerName} is already running. Syncing DB state.`);
 
                 // Ensure workspace and config file exist
-                const projectRoot = path.resolve(__dirname, '../../../../');
+                const projectRoot = path.resolve(process.cwd(), process.cwd().includes('packages') ? '../../' : './');
                 const workspacePath = path.resolve(projectRoot, 'workspaces', agentId);
                 const openclawDir = path.join(workspacePath, '.openclaw');
                 if (!fs.existsSync(openclawDir)) {
                     fs.mkdirSync(openclawDir, { recursive: true });
+                }
+                // Ensure workspace subdirectory exists (agent writes files here)
+                const workspaceSubdir = path.join(openclawDir, 'workspace');
+                if (!fs.existsSync(workspaceSubdir)) {
+                    fs.mkdirSync(workspaceSubdir, { recursive: true });
                 }
                 const configPath = path.join(openclawDir, 'openclaw.json');
                 if (!fs.existsSync(configPath)) {
@@ -85,6 +90,11 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
                         };
                     }
 
+                    // Force correct workspace path
+                    decrypted.agents = decrypted.agents || {};
+                    decrypted.agents.defaults = decrypted.agents.defaults || {};
+                    decrypted.agents.defaults.workspace = '/home/node/.openclaw/workspace';
+
                     fs.writeFileSync(configPath, JSON.stringify(decrypted, null, 2));
                 }
 
@@ -103,7 +113,7 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
             // Container doesn't exist
         }
 
-        const projectRoot = path.resolve(__dirname, '../../../../');
+        const projectRoot = path.resolve(process.cwd(), process.cwd().includes('packages') ? '../../' : './');
 
         // Determine Workspace and Host path (Must be consistent)
         const hostWorkspacesPath = process.env.HOST_WORKSPACES_PATH;
@@ -147,7 +157,6 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
                 ...(config.agents || {}),
                 defaults: {
                     ...(config.agents?.defaults || {}),
-                    workspace: internalWorkspace
                 },
                 list: [
                     {
@@ -172,6 +181,9 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
                 }
             }
         };
+
+        // Force workspace path AFTER the spread so stale DB values can't override it
+        configWithDefaults.agents.defaults.workspace = internalWorkspace;
 
         const decrypted = cryptoUtils.decryptConfig(configWithDefaults);
         const finalConfig = sanitizeConfig(decrypted);
@@ -216,7 +228,8 @@ export async function startOpenClawAgent(agentId: string, config: any, metadata:
 
         // Fix permissions recursively for the whole .openclaw dir on the host
         // This handles cases where subfolders like 'agents' or 'identity' were created as root in previous runs
-        await ensureCorrectPermissions(openclawDir);
+        // Use the host-absolute path (hostOpenclawDir) for the Docker bind mount in the permissions fixer
+        await ensureCorrectPermissions(hostOpenclawDir);
 
         const env = [
             `HOME=/home/node`,

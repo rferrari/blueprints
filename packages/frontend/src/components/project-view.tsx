@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Bot, Save, X, Plus, Skull, Play, Square, User, AlertCircle, Loader2, ShieldCheck, Zap, Activity, Cpu, Database, MessageSquare, Terminal } from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
-import AgentEditor from '@/components/agent-editor';
+import ElizaWizard from '@/components/eliza-wizard';
 import OpenClawWizard from '@/components/openclaw-wizard';
 import ChatInterface from '@/components/chat-interface';
 import ConfirmationModal from '@/components/confirmation-modal';
@@ -377,7 +377,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                         onClose={() => setEditingAgent(null)}
                     />
                 ) : (
-                    <AgentEditor
+                    <ElizaWizard
                         agent={editingAgent}
                         // Use robust fetching for actual state
                         actual={(Array.isArray(editingAgent.agent_actual_state) ? editingAgent.agent_actual_state[0] : editingAgent.agent_actual_state) || { status: 'stopped' }}

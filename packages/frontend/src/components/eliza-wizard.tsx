@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Save, X, Plus, Skull, Code, Layout, Loader2, Settings, Sparkles, Cpu, Globe, MessageSquare, Activity, User, Database, Zap, Shield, Bot } from 'lucide-react';
 
-interface AgentEditorProps {
+interface ElizaWizardProps {
     agent: any;
     actual: any;
     onSave: (config: any, metadata?: any, name?: string) => Promise<void>;
@@ -18,7 +18,7 @@ const availablePlugins = [
     { id: '@elizaos/plugin-coingecko', name: 'CoinGecko', description: 'Real-time crypto market data.' },
 ];
 
-export default function AgentEditor({ agent, actual, onSave, onClose }: AgentEditorProps) {
+export default function ElizaWizard({ agent, actual, onSave, onClose }: ElizaWizardProps) {
     const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
     const initialConfig = getOne(agent.agent_desired_state)?.config || {};
     const [config, setConfig] = useState(initialConfig);
@@ -26,6 +26,7 @@ export default function AgentEditor({ agent, actual, onSave, onClose }: AgentEdi
     const [activeTab, setActiveTab] = useState<'profile' | 'behavior' | 'style' | 'plugins' | 'secrets' | 'logs'>('profile');
     const [saving, setSaving] = useState(false);
     const [jsonError, setJsonError] = useState<string | null>(null);
+    const [localJson, setLocalJson] = useState('');
 
     const [isAddingSecret, setIsAddingSecret] = useState(false);
     const [newSecretKey, setNewSecretKey] = useState('');
@@ -57,8 +58,18 @@ export default function AgentEditor({ agent, actual, onSave, onClose }: AgentEdi
     };
 
     const handleJsonChange = (val: string) => {
+        setLocalJson(val);
         try {
-            const parsed = JSON.parse(val);
+            JSON.parse(val);
+            setJsonError(null);
+        } catch (err: any) {
+            setJsonError(err.message);
+        }
+    };
+
+    const handleSyncJson = () => {
+        try {
+            const parsed = JSON.parse(localJson);
             setConfig(parsed);
             setJsonError(null);
         } catch (err: any) {
@@ -192,7 +203,10 @@ export default function AgentEditor({ agent, actual, onSave, onClose }: AgentEdi
                                 <Layout size={14} /> Interface
                             </button>
                             <button
-                                onClick={() => setMode('json')}
+                                onClick={() => {
+                                    setMode('json');
+                                    setLocalJson(JSON.stringify(config, null, 4));
+                                }}
                                 className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${mode === 'json' ? 'bg-white text-black shadow-xl scale-105' : 'text-muted-foreground hover:text-white'}`}
                             >
                                 <Code size={14} /> Source
@@ -540,17 +554,33 @@ export default function AgentEditor({ agent, actual, onSave, onClose }: AgentEdi
                             )}
                         </div>
                     ) : (
-                        <div className="h-full flex flex-col space-y-4 animate-in fade-in duration-500">
+                        <div className="h-full flex flex-col space-y-6 animate-in fade-in duration-500">
                             <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/40">Configuration Source</span>
-                                {jsonError && <span className="text-[10px] font-bold text-destructive flex items-center gap-1"><X size={10} /> {jsonError}</span>}
+                                <div className="space-y-1">
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-primary">Neural Matrix JSON</span>
+                                    <p className="text-[10px] text-muted-foreground/40 font-medium">Direct segment injection for advanced orchestrators.</p>
+                                </div>
+                                {jsonError && (
+                                    <span className="px-3 py-1 rounded-full bg-destructive/10 text-destructive text-[10px] font-bold flex items-center gap-2 border border-destructive/20">
+                                        <X size={12} /> {jsonError}
+                                    </span>
+                                )}
                             </div>
-                            <textarea
-                                value={JSON.stringify(config, null, 4)}
-                                onChange={(e) => handleJsonChange(e.target.value)}
-                                className={`flex-1 font-mono text-sm p-8 rounded-[2rem] border bg-black/40 text-green-400 focus:outline-none min-h-[450px] custom-scrollbar ${jsonError ? 'border-destructive' : 'border-white/5 focus:border-primary/30'}`}
-                                spellCheck={false}
-                            />
+                            <div className="flex-1 min-h-[450px] relative group">
+                                <textarea
+                                    value={localJson}
+                                    onChange={(e) => handleJsonChange(e.target.value)}
+                                    className={`w-full h-full font-mono text-[11px] p-8 rounded-[2.5rem] border bg-black/40 text-emerald-400 focus:outline-none custom-scrollbar transition-all ${jsonError ? 'border-destructive/50 ring-1 ring-destructive/20' : 'border-white/5 focus:border-primary/30'}`}
+                                    spellCheck={false}
+                                />
+                                <button
+                                    onClick={handleSyncJson}
+                                    disabled={!!jsonError || !localJson}
+                                    className="absolute bottom-6 right-6 px-6 py-3 rounded-2xl bg-primary text-white font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-2xl shadow-primary/40 hover:scale-105 active:scale-95 transition-all disabled:opacity-0 disabled:scale-90"
+                                >
+                                    <Activity size={14} /> Synchronize Matrix
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

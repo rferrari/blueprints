@@ -1,19 +1,10 @@
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: packages/backend/Dockerfile
-    ports:
-      - "3000:3000"
-    env_file: .env
-    restart: unless-stopped
-
   worker:
     build:
       context: .
       dockerfile: packages/worker/Dockerfile
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./workspaces:/app/workspaces
     env_file: .env
     restart: unless-stopped

@@ -255,7 +255,7 @@ export default function AdminDashboard() {
                             <Link href="/dashboard" className="p-2 hover:bg-white/5 rounded-xl transition-colors text-muted-foreground">
                                 <ArrowLeft size={20} />
                             </Link>
-                            <h1 className="text-4xl font-black tracking-tighter uppercase">Super <span className="text-primary">Agent </span> Dashboard</h1>
+                            <h1 className="text-4xl font-black tracking-tighter uppercase">Architect's<span className="text-primary">Room</span></h1>
                         </div>
                         <p className="text-muted-foreground font-medium ml-12">Global system oversight and autonomous agent control.</p>
                     </div>

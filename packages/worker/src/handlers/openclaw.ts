@@ -124,6 +124,12 @@ export async function startOpenClawAgent(
             case SecurityLevel.ADVANCED:
                 readonlyRoot = false;
                 capAdd = ['SYS_ADMIN', 'NET_ADMIN'];
+                user = 'node';
+                break;
+
+            case SecurityLevel.ROOT:
+                readonlyRoot = false;
+                capAdd = ['SYS_ADMIN', 'NET_ADMIN'];
                 user = 'root';
                 break;
         }

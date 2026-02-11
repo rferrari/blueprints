@@ -216,7 +216,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                     ...(existingConfig.agents || {}),
                     defaults: {
                         ...(existingConfig.agents?.defaults || {}),
-                        workspace: `/home/node/.openclaw`,
+                        workspace: `~/.openclaw/workspace`,
                         model: {
                             ...(existingConfig.agents?.defaults?.model || {}),
                             primary: `${config.provider}/${modelId}`

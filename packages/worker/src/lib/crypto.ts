@@ -42,6 +42,9 @@ export const cryptoUtils = {
         const decrypted = Array.isArray(config) ? [] : {};
         for (const [key, value] of Object.entries(config)) {
             if (typeof value === 'string' && (
+                key.toUpperCase().endsWith('APIKEY') ||
+                key.toUpperCase().endsWith('KEY') ||
+                key.toUpperCase().endsWith('API') ||
                 key.toUpperCase().endsWith('_KEY') ||
                 key.toUpperCase().endsWith('_TOKEN') ||
                 key.toUpperCase() === 'TOKEN' ||

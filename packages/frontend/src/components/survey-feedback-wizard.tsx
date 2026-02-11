@@ -230,8 +230,8 @@ export default function SurveyFeedbackWizard({ onClose, plan }: SurveyFeedbackWi
                                     ))}
                                 </div>
                                 <div className="flex justify-between px-1 mt-3 text-[10px] font-black uppercase tracking-widest text-muted-foreground/30">
-                                    <span>Poor</span>
-                                    <span>Excellent</span>
+                                    <span className="text-destructive">Poor</span>
+                                    <span className="text-amber-400">Excellent</span>
                                 </div>
                             </div>
                         </div>

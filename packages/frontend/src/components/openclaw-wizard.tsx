@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { createClient } from '@/lib/supabase';
-import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG, OPENAI_ALLOWED_MODELS } from '@eliza-manager/shared';
+import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG, OPENAI_ALLOWED_MODELS, OPENAI_INCOMPATIBLE_MODELS, isOpenAICompatible } from '@eliza-manager/shared';
 import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck, Lock, Unlock, Plus, User, Activity } from 'lucide-react';
 
 interface OpenClawWizardProps {
@@ -19,6 +19,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     const [availableModels, setAvailableModels] = useState<any[]>([]);
     const [fetchingModels, setFetchingModels] = useState(false);
     const [modelError, setModelError] = useState<string | null>(null);
+    const [showAllModels, setShowAllModels] = useState(false);
     const [jsonMode, setJsonMode] = useState(false);
     const [pastedJson, setPastedJson] = useState('');
     const [name, setName] = useState(agent.name || '');
@@ -108,22 +109,33 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             if (data?.data && Array.isArray(data.data)) {
                 let models: any[] = [];
                 if (provider === 'venice') {
-                    models = data.data
-                        .filter((m: any) => m.model_spec?.capabilities?.supportsFunctionCalling === true)
-                        .map((m: any) => ({ id: m.id, name: m.model_spec?.name || m.id }));
+                    models = data.data.map((m: any) => ({
+                        id: m.id,
+                        name: m.model_spec?.name || m.id,
+                        isCompatible: m.model_spec?.capabilities?.supportsFunctionCalling === true
+                    }));
                 } else if (provider === 'openai') {
-                    models = data.data
-                        .filter((m: any) => OPENAI_ALLOWED_MODELS.has(m.id))
-                        .map((m: any) => ({ id: m.id, name: m.id }));
+                    models = data.data.map((m: any) => ({
+                        id: m.id,
+                        name: m.id,
+                        // isCompatible: OPENAI_ALLOWED_MODELS.has(m.id)
+                        // isCompatible: !OPENAI_INCOMPATIBLE_MODELS.has(m.id)
+                        isCompatible: isOpenAICompatible(m.id)
+                    }));
                 } else {
-                    models = data.data.map((m: any) => ({ id: m.id, name: m.id }));
+                    models = data.data.map((m: any) => ({
+                        id: m.id,
+                        name: m.id,
+                        isCompatible: true
+                    }));
                 }
 
                 models.sort((a: any, b: any) => a.name.localeCompare(b.name));
                 setAvailableModels(models);
 
+                // If current model is not applicable, switch to a compatible one
                 if (!config.modelId || !models.find(m => m.id === config.modelId)) {
-                    const defaultModel = models.find(m => m.id.includes('70b') || m.id.includes('gpt-4o')) || models[0];
+                    const defaultModel = models.find(m => (m.id.includes('70b') || m.id.includes('gpt-4o')) && m.isCompatible) || models.find(m => m.isCompatible) || models[0];
                     if (defaultModel) setConfig((prev: any) => ({ ...prev, modelId: defaultModel.id }));
                 }
             }
@@ -466,12 +478,22 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                     <p className="text-sm font-medium text-muted-foreground leading-relaxed">
                                         Select the neural model for **{name || agent.name}**.
                                     </p>
-                                    <button
-                                        onClick={() => fetchModels(config.provider, config.token)}
-                                        className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
-                                    >
-                                        <Zap size={12} /> Refresh List
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setShowAllModels(!showAllModels)}
+                                            className={`text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1 ${showAllModels ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}
+                                        >
+                                            {showAllModels ? <Unlock size={12} /> : <Lock size={12} />}
+                                            {showAllModels ? 'All Models' : 'Filtered'}
+                                        </button>
+                                        <div className="w-px h-3 bg-white/10" />
+                                        <button
+                                            onClick={() => fetchModels(config.provider, config.token)}
+                                            className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+                                        >
+                                            <Zap size={12} /> Refresh List
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {fetchingModels ? (
@@ -491,22 +513,29 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                                        {availableModels.map((m: any) => (
-                                            <button
-                                                key={m.id}
-                                                onClick={() => setConfig({ ...config, modelId: m.id })}
-                                                className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-4 ${config.modelId === m.id ? 'border-primary bg-primary/5' : 'border-white/5 bg-white/5 hover:border-white/10'}`}
-                                            >
-                                                <div className="size-8 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
-                                                    <Cpu size={16} className={config.modelId === m.id ? 'text-primary' : 'text-muted-foreground'} />
-                                                </div>
-                                                <div className="flex-1">
-                                                    <h4 className="font-bold text-xs uppercase tracking-widest mb-0.5">{m.name || m.id}</h4>
-                                                    <p className="text-[10px] text-muted-foreground font-mono opacity-50">{m.id}</p>
-                                                </div>
-                                                {config.modelId === m.id && <Check size={14} className="text-primary" />}
-                                            </button>
-                                        ))}
+                                        {availableModels
+                                            .filter(m => showAllModels || m.isCompatible)
+                                            .map((m: any) => (
+                                                <button
+                                                    key={m.id}
+                                                    onClick={() => setConfig({ ...config, modelId: m.id })}
+                                                    className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-4 ${config.modelId === m.id ? 'border-primary bg-primary/5' : 'border-white/5 bg-white/5 hover:border-white/10'} ${!m.isCompatible ? 'opacity-50' : ''}`}
+                                                >
+                                                    <div className="size-8 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
+                                                        <Cpu size={16} className={config.modelId === m.id ? 'text-primary' : 'text-muted-foreground'} />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <h4 className="font-bold text-xs uppercase tracking-widest mb-0.5">{m.name || m.id}</h4>
+                                                            {!m.isCompatible && (
+                                                                <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">Incompatible</span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground font-mono opacity-50">{m.id}</p>
+                                                    </div>
+                                                    {config.modelId === m.id && <Check size={14} className="text-primary" />}
+                                                </button>
+                                            ))}
                                     </div>
                                 )}
                             </div>

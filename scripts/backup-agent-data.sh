@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 AGENT_ID=$1
-BACKUP_ROOT="./backups"
+BACKUP_ROOT="~/agents-data-backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 if [ -z "$AGENT_ID" ]; then

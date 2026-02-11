@@ -1,0 +1,39 @@
+{
+  "auth": {
+    "profiles": {
+      "default": {
+        "mode": "api_key",
+        "token": "",
+        "provider": "venice"
+      }
+    }
+  },
+  "agents": {
+    "list": [
+      {
+        "id": "main",
+        "name": "Test-Error-1770789653903",
+        "workspace": "~/.openclaw/workspace"
+      }
+    ],
+    "defaults": {
+      "workspace": "~/.openclaw/workspace",
+      "maxConcurrent": 4
+    }
+  },
+  "gateway": {
+    "auth": {
+      "mode": "token",
+      "token": "test-token"
+    },
+    "mode": "local",
+    "bind": "lan",
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    }
+  }
+}

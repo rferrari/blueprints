@@ -10,6 +10,11 @@ let isReconciling = false;
 const configHashes = new Map<string, string>();
 const failCounts = new Map<string, number>();
 
+import pLimit from 'p-limit';
+
+const CONCURRENCY_LIMIT = Number(process.env.AGENT_CONCURRENCY_LIMIT || 0);
+const limit = pLimit(CONCURRENCY_LIMIT === 0 ? Infinity : CONCURRENCY_LIMIT);
+
 export async function reconcile() {
     if (isReconciling) return;
     isReconciling = true;
@@ -39,17 +44,17 @@ export async function reconcile() {
             return;
         }
 
-        const now = new Date();
         const dockerContainers = await docker.listContainers();
         const runningContainers = new Set(dockerContainers
             .filter((c: any) => (c.State || '').toLowerCase() === 'running')
             .map((c: any) => c.Names[0].replace('/', ''))
         );
 
-        for (const agent of agents) {
+        // Process all agents concurrently with limit
+        await Promise.all(agents.map((agent: any) => limit(async () => {
             const desired = agent.agent_desired_state;
             const actual = agent.agent_actual_state;
-            if (!desired) continue;
+            if (!desired) return;
 
             const now = new Date();
             const purgeDate = desired.purge_at ? new Date(desired.purge_at) : null;
@@ -89,7 +94,7 @@ export async function reconcile() {
                 } catch (cleanupErr: any) {
                     logger.error(`[PURGE] Critical failure during termination for ${agent.id}: ${cleanupErr.message}. DB record preserved for retry.`);
                 }
-                continue;
+                return;
             }
 
             const currentHash = getConfigHash(desired.config);
@@ -104,7 +109,7 @@ export async function reconcile() {
                     logger.error(`[CPU SAFETY] Agent ${agent.id} hit max retries (${currentFailCount}). Disabling...`);
                     await supabase.from('agent_desired_state').update({ enabled: false }).eq('agent_id', agent.id);
                     failCounts.delete(agent.id); // Reset so it can be tried again if user re-enables
-                    continue;
+                    return;
                 }
 
                 try {
@@ -132,6 +137,14 @@ export async function reconcile() {
                     const newCount = currentFailCount + 1;
                     failCounts.set(agent.id, newCount);
                     logger.error(`Failed to start agent ${agent.id} (Attempt ${newCount}/3):`, startError.message);
+
+                    // Update DB with error status so frontend can see it
+                    await supabase.from('agent_actual_state').upsert({
+                        agent_id: agent.id,
+                        status: 'error',
+                        error_message: startError.message,
+                        last_sync: new Date().toISOString()
+                    });
                 }
 
             } else if (!shouldBeRunning && isRunning) {
@@ -142,7 +155,8 @@ export async function reconcile() {
             } else if (shouldBeRunning && isRunning && !lastHash) {
                 configHashes.set(agent.id, currentHash);
             }
-        }
+        })));
+
     } catch (err: any) {
         logger.error('Reconciliation error:', err.message);
     } finally {

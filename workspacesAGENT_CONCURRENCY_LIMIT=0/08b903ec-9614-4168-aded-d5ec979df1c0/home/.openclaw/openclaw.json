@@ -1,0 +1,67 @@
+{
+  "auth": {
+    "profiles": {
+      "default": {
+        "mode": "api_key",
+        "provider": "blueprint_shared"
+      }
+    }
+  },
+  "agents": {
+    "list": [
+      {
+        "id": "main",
+        "name": "Onyx Sentinel",
+        "workspace": "~/.openclaw/workspace"
+      }
+    ],
+    "defaults": {
+      "model": {
+        "primary": "blueprint_shared/blueprint/shared-model"
+      },
+      "models": {
+        "blueprint_shared/blueprint/shared-model": {}
+      },
+      "subagents": {
+        "maxConcurrent": 4
+      },
+      "workspace": "~/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4
+    }
+  },
+  "models": {
+    "providers": {
+      "blueprint_shared": {
+        "apiKey": "",
+        "models": [
+          {
+            "id": "blueprint/shared-model",
+            "api": "openai-responses",
+            "name": "Blueprint Managed Intelligence",
+            "compat": {}
+          }
+        ],
+        "baseUrl": "https://api.blueprint.network/v1"
+      }
+    }
+  },
+  "gateway": {
+    "auth": {
+      "mode": "token",
+      "token": "MC4zODU4NDg0NjQ1"
+    },
+    "bind": "lan",
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    },
+    "mode": "local"
+  },
+  "channels": {}
+}

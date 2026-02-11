@@ -198,7 +198,8 @@ export async function startOpenClawAgent(
             status: 'running',
             endpoint_url: endpointUrl,
             last_sync: new Date().toISOString(),
-            effective_security_tier: effectiveLevel.toString()
+            effective_security_tier: effectiveLevel.toString(),
+            error_message: null
         });
 
     } catch (err: any) {

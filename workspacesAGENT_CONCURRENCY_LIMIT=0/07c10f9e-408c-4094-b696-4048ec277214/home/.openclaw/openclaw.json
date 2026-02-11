@@ -1,0 +1,45 @@
+{
+  "auth": {
+    "profiles": {
+      "default": {
+        "mode": "api_key",
+        "token": "",
+        "provider": "venice"
+      }
+    }
+  },
+  "agents": {
+    "list": [
+      {
+        "id": "main",
+        "name": "Phantom Zenith",
+        "workspace": "~/.openclaw/workspace"
+      }
+    ],
+    "defaults": {
+      "subagents": {
+        "maxConcurrent": 4
+      },
+      "workspace": "~/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4
+    }
+  },
+  "gateway": {
+    "auth": {
+      "mode": "token",
+      "token": "MC4xNjU0ODY0NTQx"
+    },
+    "mode": "local",
+    "bind": "lan",
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    }
+  }
+}

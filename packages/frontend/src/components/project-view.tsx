@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Bot, Save, X, Plus, Skull, Play, Square, User, AlertCircle, Loader2, ShieldCheck, Zap, Activity, Cpu, Database, MessageSquare, Terminal } from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
+import { createClient } from '@/lib/supabase';
 import ElizaWizard from '@/components/eliza-wizard';
 import OpenClawWizard from '@/components/openclaw-wizard';
 import ChatInterface from '@/components/chat-interface';
@@ -14,6 +15,14 @@ interface Project {
     tier: string;
 }
 
+interface LocalAgentState {
+    pendingAction?: string; // 'starting' | 'stopping'
+    commandId?: string;
+    error?: string;
+    terminateRequestedAt?: number;
+    pendingEnabled?: boolean;
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 const COOL_NAMES = [
@@ -22,6 +31,24 @@ const COOL_NAMES = [
     'Silicon Reaper', 'Echo Prime', 'Nexus Core', 'Zenith Auditor',
     'Solar Flare', 'Lunar Shadow', 'Onyx Sentinel', 'Cobalt Phantom'
 ];
+
+const generateCoolName = () => {
+    // Split all names into individual words
+    const words = COOL_NAMES.flatMap(name => name.split(' '));
+    // Remove duplicates just in case
+    const uniqueWords = [...new Set(words)];
+
+    // Pick 2 random words
+    const r1 = Math.floor(Math.random() * uniqueWords.length);
+    let r2 = Math.floor(Math.random() * uniqueWords.length);
+
+    // Ensure we don't pick the same word twice
+    while (r2 === r1) {
+        r2 = Math.floor(Math.random() * uniqueWords.length);
+    }
+
+    return `${uniqueWords[r1]} ${uniqueWords[r2]}`;
+};
 
 export default function ProjectView({ projectId, onDataChange, onUpgrade }: { projectId: string; onDataChange?: () => void; onUpgrade?: () => void }) {
     const { session } = useAuth();
@@ -44,6 +71,16 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     const [loadingAgents, setLoadingAgents] = useState<Set<string>>(new Set());
     const [purgingAgents, setPurgingAgents] = useState<Set<string>>(new Set());
     const [isInstalling, setIsInstalling] = useState(false);
+
+    // robust local state for agent feedback
+    const [localState, setLocalState] = useState<Record<string, LocalAgentState>>({});
+
+    const updateLocalState = (agentId: string, update: Partial<LocalAgentState>) => {
+        setLocalState(prev => ({
+            ...prev,
+            [agentId]: { ...prev[agentId], ...update }
+        }));
+    };
 
     const fetchProjectAndAgents = useCallback(async (isInitial = false) => {
         if (!session?.access_token) return;
@@ -112,6 +149,45 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         return () => clearInterval(interval);
     }, []);
 
+    // Real-time Status Sync
+    useEffect(() => {
+        const sb = createClient();
+
+        const channel = sb
+            .channel('agent-status-updates')
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'agent_actual_state',
+            }, (payload: any) => {
+                if (!payload.new || !payload.new.agent_id) return;
+
+                setAgents((prev) => prev.map(a => {
+                    if (a.id === payload.new.agent_id) {
+                        // robustly update actual state
+                        const currentActual = Array.isArray(a.agent_actual_state) ? a.agent_actual_state[0] : a.agent_actual_state;
+
+                        // If we have a local pending action that matches the new status, clear it
+                        const local = localState[a.id];
+                        if (local?.pendingAction === payload.new.status) {
+                            updateLocalState(a.id, { pendingAction: undefined, commandId: undefined });
+                        }
+
+                        return {
+                            ...a,
+                            agent_actual_state: { ...currentActual, ...payload.new }
+                        };
+                    }
+                    return a;
+                }));
+            })
+            .subscribe();
+
+        return () => {
+            sb.removeChannel(channel);
+        };
+    }, [localState, updateLocalState]);
+
     const handleInstallAgent = async () => {
         if (!newAgentName || !session?.access_token || isInstalling) return;
         setIsInstalling(true);
@@ -146,16 +222,18 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     };
     const toggleAgent = async (agentId: string, enabled: boolean) => {
         if (!session?.access_token) return;
-        try {
-            // Optimistic UI update
-            setAgents(prev => prev.map(a => a.id === agentId ? {
-                ...a,
-                agent_actual_state: {
-                    ...((Array.isArray(a.agent_actual_state) ? a.agent_actual_state[0] : a.agent_actual_state) || {}),
-                    status: enabled ? 'starting' : 'stopping'
-                }
-            } : a));
 
+        const commandId = crypto.randomUUID();
+        const action = enabled ? 'starting' : 'stopping';
+
+        // 1. Optimistic Update
+        updateLocalState(agentId, {
+            pendingAction: action,
+            commandId,
+            error: undefined // Clear previous errors
+        });
+
+        try {
             const res = await fetch(`${API_URL}/agents/${agentId}/config`, {
                 method: 'PATCH',
                 headers: {
@@ -164,14 +242,38 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                 },
                 body: JSON.stringify({ enabled })
             });
+
             if (!res.ok) throw new Error('Failed to update agent state');
+
             await fetchProjectAndAgents();
-            setError(null);
+
+            // 2. Success: Clear pending action ONLY if commandId matches
+            setLocalState(prev => {
+                if (prev[agentId]?.commandId === commandId) {
+                    const { pendingAction, commandId: _, ...rest } = prev[agentId];
+                    return { ...prev, [agentId]: rest };
+                }
+                return prev;
+            });
+
             onDataChange?.();
         } catch (err: any) {
-            setError(err.message);
-            // Revert optimistic update on error
-            await fetchProjectAndAgents();
+            // 3. Error: Clear pending action and set Error
+            setLocalState(prev => {
+                if (prev[agentId]?.commandId === commandId) {
+                    return {
+                        ...prev,
+                        [agentId]: {
+                            ...prev[agentId],
+                            pendingAction: undefined,
+                            error: enabled ? 'Start Failed' : 'Stop Failed'
+                        }
+                    };
+                }
+                return prev;
+            });
+            // We do NOT call fetchProjectAndAgents here to avoid overwriting the error state with a stale "running" state immediately
+            // But usually, we might want to ensure consistency. Given the requirement "revert status", clearing pendingAction does that (reverts to actual)
         }
     };
 
@@ -182,9 +284,17 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         // Add loading state
         setLoadingAgents(prev => new Set(prev).add(agentId));
 
-        // Optimistic update
-        const stopBuffer = currentStatus === 'running' || currentStatus === 'starting' ? 10 * 1000 : 0;
+        // Mark termination start time for local phase calculation
+        updateLocalState(agentId, {
+            terminateRequestedAt: Date.now(),
+            error: undefined
+        });
+
+        // 5 second buffer for running agents, 0 for stopped
+        const stopBuffer = currentStatus === 'running' || currentStatus === 'starting' ? 5000 : 0;
         const purgeAt = new Date(Date.now() + (24 * 60 * 60 * 1000) + stopBuffer).toISOString();
+
+        // Optimistic update for UI countdowns (desired state)
         setAgents(prev => prev.map(a =>
             a.id === agentId
                 ? { ...a, agent_desired_state: { ...a.agent_desired_state, purge_at: purgeAt } }
@@ -207,7 +317,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         } catch (err: any) {
             // Revert optimistic update on error
             await fetchProjectAndAgents();
-            setError(err.message);
+            updateLocalState(agentId, { error: 'Termination Failed' });
         } finally {
             setLoadingAgents(prev => {
                 const next = new Set(prev);
@@ -297,38 +407,68 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     const handleAbortPurge = async (agentId: string) => {
         if (!session?.access_token) return;
 
-        // Add loading state
-        setLoadingAgents(prev => new Set(prev).add(agentId));
+        const commandId = crypto.randomUUID();
 
-        // Optimistic update - remove purge_at immediately
-        setAgents(prev => prev.map(a =>
-            a.id === agentId
-                ? { ...a, agent_desired_state: { ...a.agent_desired_state, purge_at: null } }
-                : a
-        ));
+        // Determine if we need to force disable (if currently stopped)
+        const agent = agents.find(a => a.id === agentId);
+        const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
+        const rawActual = agent ? (getOne(agent.agent_actual_state) || { status: 'stopped' }) : { status: 'stopped' };
+
+        // Critical Fix: If actual status is stopped, we MUST ensure enabled=false is sent
+        // faster than the purge_at=null update to prevent auto-restart loop
+        const isStopped = rawActual.status !== 'running' && rawActual.status !== 'starting';
+
+        // 1. Optimistic Update
+        updateLocalState(agentId, {
+            pendingAction: 'aborting',
+            terminateRequestedAt: undefined,
+            commandId,
+            error: undefined,
+            pendingEnabled: isStopped ? false : undefined
+        });
 
         try {
+            const body: any = { purge_at: null };
+            // Explicitly force enabled=false if it's not running, to prevent "Stop -> Start" race
+            if (isStopped) body.enabled = false;
+
             const res = await fetch(`${API_URL}/agents/${agentId}/config`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${session.access_token}`
                 },
-                body: JSON.stringify({ purge_at: null })
+                body: JSON.stringify(body)
             });
+
             if (!res.ok) throw new Error('Failed to abort purge');
+
             await fetchProjectAndAgents();
-            setError(null);
+
+            // 2. Success
+            setLocalState(prev => {
+                if (prev[agentId]?.commandId === commandId) {
+                    const { pendingAction, commandId: _, ...rest } = prev[agentId];
+                    return { ...prev, [agentId]: rest };
+                }
+                return prev;
+            });
+
             onDataChange?.();
         } catch (err: any) {
-            // Revert optimistic update on error
-            await fetchProjectAndAgents();
-            setError(err.message);
-        } finally {
-            setLoadingAgents(prev => {
-                const next = new Set(prev);
-                next.delete(agentId);
-                return next;
+            // 3. Error
+            setLocalState(prev => {
+                if (prev[agentId]?.commandId === commandId) {
+                    return {
+                        ...prev,
+                        [agentId]: {
+                            ...prev[agentId],
+                            pendingAction: undefined,
+                            error: 'Abort Failed'
+                        }
+                    };
+                }
+                return prev;
             });
         }
     };
@@ -439,7 +579,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                 e.preventDefault();
                                 e.stopPropagation();
                                 if (!isAtLimit) {
-                                    const randomName = COOL_NAMES[Math.floor(Math.random() * COOL_NAMES.length)];
+                                    const randomName = generateCoolName();
                                     setNewAgentName(randomName);
                                     setIsAdding(true);
                                 } else {
@@ -541,27 +681,73 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                 {agents.map((agent: any) => {
                     // Robust state extraction (handle both array and object from Supabase joins)
                     const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
-                    const desired = getOne(agent.agent_desired_state) || { enabled: false, purge_at: null };
-                    const actual = getOne(agent.agent_actual_state) || { status: 'stopped' };
-
-                    // Countdown Logic
                     const now = new Date();
-                    const purgeDate = desired.purge_at ? new Date(desired.purge_at) : null;
-                    const stopDate = purgeDate ? new Date(purgeDate.getTime() - (24 * 60 * 60 * 1000)) : null;
 
+                    const local = localState[agent.id] || {};
+
+                    // Derived Desired State
+                    const rawDesired = getOne(agent.agent_desired_state) || { enabled: false, purge_at: null };
+                    const desired = { ...rawDesired };
+
+                    const rawActual = getOne(agent.agent_actual_state) || { status: 'stopped' };
+                    const actual = { ...rawActual };
+
+                    // Apply Local Overrides
+                    if (local.pendingAction === 'aborting') {
+                        desired.purge_at = null;
+                        if (local.pendingEnabled !== undefined) {
+                            desired.enabled = local.pendingEnabled;
+                        }
+                    }
+
+                    // Derived Status Logic
+                    let displayStatus = local.pendingAction || actual.status;
                     let purgeStatus = null;
-                    if (purgeDate && !isNaN(purgeDate.getTime())) {
-                        if (now < stopDate!) {
-                            const diff = stopDate!.getTime() - now.getTime();
-                            const mins = Math.floor(diff / 60000);
-                            const secs = Math.floor((diff % 60000) / 1000);
-                            purgeStatus = { label: 'STOPPING IN', time: `${mins}:${secs.toString().padStart(2, '0')}`, color: 'text-amber-500 bg-amber-500/10 border-amber-500/20' };
-                        } else if (now < purgeDate) {
+
+                    // Termination Phases
+                    if (local.terminateRequestedAt && desired.purge_at) {
+                        const timeSinceReq = now.getTime() - local.terminateRequestedAt;
+
+                        // Phase A: 0-5s -> Force RUNNING + Stopping In
+                        if (timeSinceReq < 5000 && actual.status === 'running') {
+                            displayStatus = 'running';
+                            // Calculate remaining seconds for STOPPING IN
+                            const rem = Math.ceil((5000 - timeSinceReq) / 1000);
+                            purgeStatus = {
+                                label: 'STOPPING IN',
+                                time: `00:0${rem}`,
+                                color: 'text-amber-500 bg-amber-500/10 border-amber-500/20'
+                            };
+                        }
+                        // Phase B: >5s -> Force STOPPING
+                        else if (timeSinceReq >= 5000 && actual.status === 'running') {
+                            // Check for timeout (Phase C)
+                            if (timeSinceReq > 65000) { // 1m + 5s buffer
+                                displayStatus = 'running'; // Revert to actual
+                                // We should ideally set an error here, but doing it in render is side-effecty.
+                                // Instead we just show the error badge if we had one, or let the user try again.
+                                // For now, let's just let it revert to 'running' which implies it failed to stop.
+                            } else {
+                                displayStatus = 'stopping';
+                            }
+                        }
+                    }
+
+                    // Existing logic for "Terminating In" (long term countdown)
+                    // We only show this if we are NOT in the "Stopping In" short phase
+                    if (!purgeStatus && desired.purge_at) {
+                        const purgeDate = new Date(desired.purge_at);
+                        if (purgeDate && !isNaN(purgeDate.getTime()) && now < purgeDate) {
+                            // If we are past the 5s buffer, we are in TERMINATING IN
                             const diff = purgeDate.getTime() - now.getTime();
                             const hours = Math.floor(diff / 3600000);
                             const mins = Math.floor((diff % 3600000) / 60000);
-                            const secs = Math.floor((diff % 60000) / 1000);
-                            purgeStatus = { label: 'TERMINATING IN', time: `${hours}h ${mins}m`, color: 'text-destructive bg-destructive/10 border-destructive/20 animate-pulse font-black shadow-[0_0_15px_rgba(239,68,68,0.2)]' };
+
+                            purgeStatus = {
+                                label: 'TERMINATING IN',
+                                time: `${hours}h ${mins}m`,
+                                color: 'text-destructive bg-destructive/10 border-destructive/20 animate-pulse font-black shadow-[0_0_15px_rgba(239,68,68,0.2)]'
+                            };
                         }
                     }
 
@@ -574,7 +760,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                             )}
                             <div className="flex flex-col md:flex-row justify-between items-center gap-6">
                                 <div className="flex items-center gap-6 flex-1">
-                                    <div className={`size-20 rounded-[1.75rem] flex items-center justify-center transition-all duration-700 shadow-2xl ${actual.status === 'running'
+                                    <div className={`size-20 rounded-[1.75rem] flex items-center justify-center transition-all duration-700 shadow-2xl ${displayStatus === 'running'
                                         ? 'bg-green-500/10 text-green-500 shadow-green-500/10 scale-110'
                                         : 'bg-white/5 text-muted-foreground/40'
                                         }`}>
@@ -583,15 +769,42 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                     <div>
                                         <div className="flex items-center gap-3 mb-1">
                                             <h4 className="font-black text-2xl tracking-tighter group-hover:text-primary transition-colors">{agent.name}</h4>
-                                            <span className={`size-2 rounded-full ${actual.status === 'running' ? 'bg-green-500 animate-glow brightness-150' :
-                                                actual.status === 'error' ? 'bg-destructive shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'bg-muted-foreground/30'
+                                            <span className={`size-2 rounded-full ${displayStatus === 'running' ? 'bg-green-500 animate-glow brightness-150' :
+                                                displayStatus === 'starting' ? 'bg-amber-500 animate-pulse' :
+                                                    displayStatus === 'stopping' ? 'bg-amber-500 animate-pulse' :
+                                                        actual.status === 'error' ? 'bg-destructive shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'bg-muted-foreground/30'
                                                 }`} />
+                                            {local.error && (
+                                                <span className="px-2 py-0.5 rounded-full bg-destructive/20 text-destructive text-[9px] font-black uppercase tracking-widest border border-destructive/20 ml-2 animate-in fade-in slide-in-from-left-2">
+                                                    {local.error}
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-4 text-[10px] font-black uppercase tracking-widest">
-                                            <span className={actual.status === 'running' ? 'text-green-500' : 'text-muted-foreground'}>{actual.status}</span>
+                                            <span className={displayStatus === 'running' ? 'text-green-500' : 'text-muted-foreground'}>{displayStatus}</span>
                                             <span className="text-white/20">•</span>
                                             <span className="text-muted-foreground/50">Framework: {agent.framework || 'eliza'}</span>
                                             <span className="text-white/20">•</span>
+                                            {/* Status / Error Indicator */}
+                                            {actual.status === 'error' ? (
+                                                <div className="flex items-center gap-1 text-destructive group relative cursor-help">
+                                                    <AlertCircle size={10} />
+                                                    <span className="truncate max-w-[150px]">{actual.error_message || 'Error'}</span>
+                                                    {/* Tooltip for full error */}
+                                                    {actual.error_message && (
+                                                        <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block w-64 p-2 bg-destructive text-destructive-foreground text-xs rounded shadow-lg z-50">
+                                                            {actual.error_message}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : local.pendingAction ? (
+                                                <div className="flex items-center gap-1 text-amber-500">
+                                                    <Loader2 size={10} className="animate-spin" />
+                                                    <span>{local.pendingAction.toUpperCase()}...</span>
+                                                </div>
+                                            ) : null}
+                                            {actual.status === 'error' || local.pendingAction ? <span className="text-white/20">•</span> : null}
+
                                             {purgeStatus ? (
                                                 <button
                                                     onClick={(e) => {
@@ -622,7 +835,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
                                 <div className="flex items-center gap-4 p-2 bg-white/5 rounded-[1.5rem] border border-white/5">
                                     <button
-                                        disabled={actual.status === 'starting' || actual.status === 'stopping' || !!desired.purge_at}
+                                        disabled={displayStatus === 'starting' || displayStatus === 'stopping' || !!desired.purge_at}
                                         className={`size-14 rounded-2xl transition-all duration-300 flex items-center justify-center shadow-lg ${desired.purge_at
                                             ? 'bg-muted/10 text-muted-foreground/30 cursor-not-allowed'
                                             : desired.enabled
@@ -632,7 +845,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                         title={
                                             desired.purge_at
                                                 ? 'Agent scheduled for termination'
-                                                : desired.enabled ? 'Stop Skills' : 'Start Skills'
+                                                : desired.enabled ? 'Stop Agent' : 'Start Agent'
                                         }
                                         onClick={(e) => {
                                             e.preventDefault();
@@ -655,13 +868,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                         <User size={22} />
                                     </button>
                                     <button
-                                        disabled={actual.status !== 'running'}
+                                        disabled={displayStatus !== 'running'}
                                         onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
                                             setChattingAgentId(agent.id);
                                         }}
-                                        className={`size-14 rounded-2xl flex items-center justify-center transition-all active:scale-95 ${actual.status === 'running'
+                                        className={`size-14 rounded-2xl flex items-center justify-center transition-all active:scale-95 ${displayStatus === 'running'
                                             ? 'text-primary hover:bg-primary/10'
                                             : 'text-muted-foreground/30 cursor-not-allowed'
                                             }`}
@@ -681,7 +894,9 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                             : 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive'}`}
                                         title={desired.purge_at ? 'ABORT TERMINATION' : 'Terminate Agent'}
                                     >
-                                        <Skull size={22} />
+                                        {local.pendingAction === 'aborting' ? <Loader2 size={22} className="animate-spin" /> :
+                                            <Skull size={22} />
+                                        }
                                     </button>
                                 </div>
                             </div>

@@ -86,7 +86,8 @@ export async function startElizaAgent(agentId: string, config: any) {
     await supabase.from('agent_actual_state').upsert({
         agent_id: agentId,
         status: 'running',
-        last_sync: new Date().toISOString()
+        last_sync: new Date().toISOString(),
+        error_message: null
     });
 }
 

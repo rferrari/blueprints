@@ -4,7 +4,7 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "dev": "tsx src/app.ts | pino-pretty -t 'HH:mm:ss' -i 'pid,hostname' --colorize",
+        "dev": "bun --watch src/app.ts | pino-pretty -t 'HH:mm:ss' -i 'pid,hostname' --colorize",
         "build": "tsc",
         "start": "node dist/src/app.js"
     },

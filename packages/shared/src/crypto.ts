@@ -43,17 +43,36 @@ export const cryptoUtils = {
      * @returns true if key indicates sensitive data
      */
     isSensitiveKey(key: string): boolean {
-        const upper = key.toUpperCase();
-        return (
-            upper.endsWith('APIKEY') ||
-            upper.endsWith('KEY') ||
-            upper.endsWith('API') ||
-            upper.endsWith('_KEY') ||
-            upper.endsWith('_TOKEN') ||
-            upper === 'TOKEN' ||
-            upper.includes('SECRET') ||
-            upper.includes('PASSWORD')
-        );
+        const k = key.toUpperCase();
+
+        const strongSignals = [
+            'SECRET',
+            'PASSWORD',
+            'PASSWD',
+            'PRIVATE_KEY',
+            'ACCESS_TOKEN',
+            'REFRESH_TOKEN',
+            'SERVICE_ROLE',
+            'BEARER',
+            'JWT',
+        ];
+
+        const weakSignals = [
+            '_KEY',
+            '_TOKEN',
+            'API_KEY',
+            'CLIENT_SECRET',
+            'AUTH',
+        ];
+
+        if (strongSignals.some(s => k.includes(s))) return true;
+
+        if (weakSignals.some(s => k.includes(s))) return true;
+
+        // Exact matches
+        if (['TOKEN', 'APIKEY', 'API_KEY'].includes(k)) return true;
+
+        return false;
     },
 
     /**

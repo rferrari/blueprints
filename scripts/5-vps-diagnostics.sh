@@ -83,6 +83,9 @@ echo -e "\n${BOLD}🗃️  3.1 Database Schema Integrity Check${NC}"
 echo -e "${BLUE}Comparing live schema with migrations/schema.sql...${NC}"
 # Use the same bun run command but make sure we have the context
 if [ -f "$DOTENV_PATH" ]; then
+    # Export vars so the bun script picks them up from environment
+    export SUPABASE_URL="$S_URL"
+    export SUPABASE_SERVICE_ROLE_KEY="$S_KEY"
     bun run "$SCRIPT_DIR/db-integrity-check.ts" || echo -e "${RED}❌ Schema mismatch detected!${NC}"
 else
     echo -e "${YELLOW}⚠️  Skipping schema check (no worker .env for credentials).${NC}"

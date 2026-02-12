@@ -82,6 +82,27 @@ Not exposed to end users.
 
 ---
 
+ The Communication Flow
+The path of a message looks like this: 
+User
+ → Frontend → Database → Worker → OpenClaw Agent (Docker) → LLM (OpenAI/Venice/etc.)
+
+Worker to OpenClaw Agent: This is where chatCompletions matters. We use the OpenAI-compatible API format to talk to the agent container. We do this because it's a standard way to send "messages" and get "responses" that include tool-use and planning logic.
+OpenClaw Agent to LLM: The agent takes your message, thinks about it, and then talks to the actual LLM (like GPT-3.5 or a Venice model). It handles all the complex stuff (memory, tools, terminal commands).
+2. What is chatCompletions?
+When we set chatCompletions: { enabled: true } in the openclaw.json, we are telling the Agent's internal gateway to turn on its "OpenAI-compatible server."
+
+Regardless of what LLM the agent is using (even if the LLM itself isn't OpenAI-compatible), the Agent acts as a translator. It presents itself to our Worker as an OpenAI-compatible endpoint. This allows our Worker to use a single, unified code path to talk to any OpenClaw agent.
+
+3. "OpenAI Compatible" vs "Non-Compatible" Models
+There are two types of compatibility to consider:
+
+Provider Compatibility (The LLM):
+If a model is OpenAI-compatible (like Venice models or GPT), OpenClaw talks to it using the standard openai provider.
+If a model is NOT OpenAI-compatible (like Anthropic/Claude), OpenClaw has special "providers" built-in to handle the translation.
+Agent Compatibility (How we talk to the container):
+Because we enabled the chatCompletions endpoint, we can always talk to the agent using the worker's chat logic, even if the agent is using a non-OpenAI model as its brain.
+
 ### Architectural Model
 
 STANDARD → jailed

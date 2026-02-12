@@ -103,6 +103,19 @@ Examples:
 
             let attempts = 0;
 
+            const translateError = (err: string) => {
+                if (err.includes('socket connection was closed') || err.includes('ECONNREFUSED')) {
+                    return "🚫 [AGENT CONNECTION ERROR]: The agent container is unreachable. It might still be booting or has crashed. Please check the Agent Status in the dashboard.";
+                }
+                if (err.includes('context window')) {
+                    return "⚠️ [MODEL CAPACITY ERROR]: This conversation has exceeded the AI model's memory limit (context window). Try using a model with a larger context (like gpt-4o) or start a new conversation.";
+                }
+                if (err.includes('Unauthorized') || err.includes('unauthorized') || err.includes('401')) {
+                    return "🔑 [AUTHENTICATION ERROR]: Invalid API Key or Gateway Token. Please verify your Neural Configuration in the Wizard.";
+                }
+                return `❌ [AGENT ERROR]: ${err}`;
+            };
+
             while (attempts < 5) {
                 attempts++;
 
@@ -121,15 +134,23 @@ Examples:
                         signal: AbortSignal.timeout(120000)
                     });
 
-                    if (!res.ok) throw new Error(await res.text());
+                    if (!res.ok) {
+                        const errorText = await res.text();
+                        throw new Error(errorText);
+                    }
 
                     const json: any = await res.json();
                     agentResponse = json.choices?.[0]?.message?.content || '';
+
+                    if (agentResponse === "No response from OpenClaw.") {
+                        agentResponse = "📡 [GATEWAY TIMEOUT]: The agent failed to respond in time. This is often due to an overloaded model context window or a slow API provider connection.";
+                    }
+
                     break;
 
                 } catch (err: any) {
                     if (attempts >= 5) {
-                        agentResponse = `[AGENT ERROR]: ${err.message}`;
+                        agentResponse = translateError(err.message);
                         break;
                     }
 

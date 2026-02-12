@@ -35,14 +35,18 @@ export async function startOpenClawAgent(
             await existing.remove();
         } catch { }
 
-        const agentsDataContainerPath = process.env.AGENTS_DATA_CONTAINER_PATH;
-        const agentsDataHostPath = process.env.AGENTS_DATA_HOST_PATH;
+        const agentsDataContainerPath = process.env.AGENTS_DATA_CONTAINER_PATH || './workspaces';
+        const agentsDataHostPath = process.env.AGENTS_DATA_HOST_PATH || './workspaces';
 
-        if (!agentsDataContainerPath || !agentsDataHostPath) {
-            throw new Error("AGENTS_DATA_CONTAINER_PATH or AGENTS_DATA_HOST_PATH not defined");
-        }
+        const absoluteContainerPath = path.isAbsolute(agentsDataContainerPath)
+            ? agentsDataContainerPath
+            : path.resolve(process.cwd(), agentsDataContainerPath);
 
-        const agentRootPath = path.join(agentsDataContainerPath, agentId);
+        const absoluteHostPath = path.isAbsolute(agentsDataHostPath)
+            ? agentsDataHostPath
+            : path.resolve(process.cwd(), agentsDataHostPath);
+
+        const agentRootPath = path.join(absoluteContainerPath, agentId);
         const homeDir = path.join(agentRootPath, 'home');
         const openclawDir = path.join(homeDir, '.openclaw');
 
@@ -78,6 +82,18 @@ export async function startOpenClawAgent(
         const decrypted = cryptoUtils.decryptConfig(configWithDefaults);
         const finalConfig = sanitizeConfig(decrypted);
 
+        // Force workspace path in the config to match what we expect in the container
+        if (!finalConfig.agents) finalConfig.agents = {};
+        if (!finalConfig.agents.defaults) finalConfig.agents.defaults = {};
+        finalConfig.agents.defaults.workspace = "/agent-home/.openclaw/workspace";
+
+        // Also force for any specific agent in the list to avoid UUID suffixes
+        if (Array.isArray(finalConfig.agents.list)) {
+            finalConfig.agents.list.forEach((a: any) => {
+                a.workspace = "/agent-home/.openclaw/workspace";
+            });
+        }
+
         if (JSON.stringify(decrypted) !== JSON.stringify(finalConfig)) {
             await supabase
                 .from('agent_desired_state')
@@ -97,7 +113,6 @@ export async function startOpenClawAgent(
             `OPENCLAW_GATEWAY_MODE=local`,
             `OPENCLAW_WORKSPACE_DIR=/agent-home/.openclaw/workspace`
         ];
-
 
         if (finalConfig.gateway?.auth?.token) {
             env.push(`OPENCLAW_GATEWAY_TOKEN=${finalConfig.gateway.auth.token}`);
@@ -167,7 +182,7 @@ export async function startOpenClawAgent(
             Cmd: cmd,
             ExposedPorts: { '18789/tcp': {} },
             HostConfig: {
-                Binds: [`${path.join(agentsDataHostPath, agentId, 'home')}:/agent-home`],
+                Binds: [`${path.join(absoluteHostPath, agentId, 'home')}:/agent-home`],
                 PortBindings: { '18789/tcp': [{ HostPort: hostPort.toString(), HostIp: '127.0.0.1' }] },
                 RestartPolicy: { Name: 'unless-stopped' },
 

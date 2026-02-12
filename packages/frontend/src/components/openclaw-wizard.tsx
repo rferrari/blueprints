@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { createClient } from '@/lib/supabase';
-import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG, OPENAI_ALLOWED_MODELS, OPENAI_INCOMPATIBLE_MODELS, isOpenAICompatible } from '@eliza-manager/shared';
+import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG, isOpenAICompatible, isModelCompatible } from '@eliza-manager/shared';
 import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck, Lock, Unlock, Plus, User, Activity } from 'lucide-react';
 
 interface OpenClawWizardProps {
@@ -53,7 +53,8 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     const [config, setConfig] = useState({
         provider: existingConfig.auth?.profiles?.['default']?.provider || 'venice', // Default to Venice
         mode: 'api_key', // Enforce API Key
-        token: existingConfig.models?.providers?.[existingConfig.auth?.profiles?.['default']?.provider]?.apiKey || '',
+        // If editing, we start with an empty token to allow "leave blank to keep same"
+        token: '',
         gatewayToken: existingConfig.gateway?.auth?.token || Math.random().toString(36).substring(2, 15),
         modelId: existingConfig.agents?.defaults?.model?.primary?.split('/').pop() || 'llama-3.3-70b',
 
@@ -73,6 +74,13 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         ...existingConfig
     });
 
+    // Auto-sync models when token is pasted or provider changed
+    React.useEffect(() => {
+        if (config.token && config.token.length > 20) {
+            fetchModels(config.provider, config.token);
+        }
+    }, [config.token, config.provider]);
+
     const fetchModels = async (provider: string, token: string) => {
         if (!token) return;
         setFetchingModels(true);
@@ -81,28 +89,43 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             let url = '';
             if (provider === 'venice') url = 'https://api.venice.ai/api/v1/models';
             else if (provider === 'openai') url = 'https://api.openai.com/v1/models';
-            else if (provider === 'anthropic') {
-                const models = [
-                    { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
-                    { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' },
-                    { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' }
-                ];
-                setAvailableModels(models);
-                if (!config.modelId || !models.find((m: any) => m.id === config.modelId)) {
-                    setConfig((prev: any) => ({ ...prev, modelId: models[0].id }));
-                }
-                setFetchingModels(false);
-                return;
-            }
+            else if (provider === 'anthropic') url = 'https://api.anthropic.com/v1/models';
+            else if (provider === 'groq') url = 'https://api.groq.com/openai/v1/models';
+            else if (provider === 'deepseek') url = 'https://api.deepseek.com/models';
+            else if (provider === 'mistral') url = 'https://api.mistral.ai/v1/models';
+
+            //         else if (provider === 'anthropic') {
+            //     const models = [
+            //         { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+            //         { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' },
+            //         { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' }
+            //     ];
+            //     setAvailableModels(models);
+            //     if (!config.modelId || !models.find((m: any) => m.id === config.modelId)) {
+            //         setConfig((prev: any) => ({ ...prev, modelId: models[0].id }));
+            //     }
+            //     setFetchingModels(false);
+            //     return;
+            // }
 
             if (!url) {
                 setFetchingModels(false);
                 return;
             }
 
-            const res = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const headers: Record<string, string> = {};
+
+            if (provider === 'anthropic') {
+                headers['x-api-key'] = token;
+                headers['anthropic-version'] = '2023-06-01';
+                // headers['content-type'] = 'application/json';
+                // Anthropic might require client-side fetch adjustment or proxy due to CORS
+                // headers['dangerously-allow-browser'] = 'true';
+            } else {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const res = await fetch(url, { headers });
             if (!res.ok) throw new Error(`Failed to fetch models: ${res.statusText}`);
             const data = await res.json();
 
@@ -114,19 +137,11 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         name: m.model_spec?.name || m.id,
                         isCompatible: m.model_spec?.capabilities?.supportsFunctionCalling === true
                     }));
-                } else if (provider === 'openai') {
-                    models = data.data.map((m: any) => ({
-                        id: m.id,
-                        name: m.id,
-                        // isCompatible: OPENAI_ALLOWED_MODELS.has(m.id)
-                        // isCompatible: !OPENAI_INCOMPATIBLE_MODELS.has(m.id)
-                        isCompatible: isOpenAICompatible(m.id)
-                    }));
                 } else {
                     models = data.data.map((m: any) => ({
                         id: m.id,
                         name: m.id,
-                        isCompatible: true
+                        isCompatible: isModelCompatible(m.id)
                     }));
                 }
 
@@ -150,7 +165,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     const steps = [
         { id: 1, title: 'Neural Identity', icon: <User size={20} /> },
         { id: 2, title: 'Intelligence Provider', icon: <Zap size={20} /> },
-        { id: 3, title: 'Model Selection', icon: <Cpu size={20} /> },
+        { id: 3, title: 'Neural Configuration', icon: <Cpu size={20} /> },
         { id: 4, title: 'Permissions & Security', icon: <Shield size={20} /> },
         { id: 5, title: 'Communication Channels', icon: <Share2 size={20} /> },
         { id: 6, title: 'Channel Configuration', icon: <MessageSquare size={20} /> },
@@ -192,6 +207,29 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                 modelName = found ? found.name || modelId : 'OpenAI Model';
                 modelApi = 'openai-responses';
                 baseUrl = 'https://api.openai.com/v1';
+            } else if (config.provider === 'groq') {
+                modelId = config.modelId || 'llama-3.3-70b-versatile';
+                const found = availableModels.find((m: any) => m.id === modelId);
+                modelName = found ? found.name || modelId : 'Groq Model';
+                modelApi = 'openai-completions';
+                baseUrl = 'https://api.groq.com/openai/v1';
+            } else if (config.provider === 'deepseek') {
+                modelId = config.modelId || 'deepseek-chat';
+                const found = availableModels.find((m: any) => m.id === modelId);
+                modelName = found ? found.name || modelId : 'DeepSeek Model';
+                modelApi = 'openai-completions';
+                baseUrl = 'https://api.deepseek.com';
+            } else if (config.provider === 'mistral') {
+                modelId = config.modelId || 'mistral-large-latest';
+                const found = availableModels.find((m: any) => m.id === modelId);
+                modelName = found ? found.name || modelId : 'Mistral Model';
+                modelApi = 'openai-completions';
+                baseUrl = 'https://api.mistral.ai/v1';
+            } else if (config.provider === 'ollama') {
+                modelId = config.modelId || 'llama3';
+                modelName = 'Local Model';
+                modelApi = 'openai-completions';
+                baseUrl = 'http://localhost:11434/v1';
             } else if (config.provider === 'blueprint_shared') {
                 modelId = 'blueprint/shared-model';
                 modelName = 'Blueprint Managed Intelligence';
@@ -216,7 +254,8 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                     providers: {
                         ...(existingConfig.models?.providers || {}),
                         [config.provider]: {
-                            apiKey: config.token,
+                            // If token is empty, preserve the existing one
+                            apiKey: config.token || existingConfig.models?.providers?.[config.provider]?.apiKey || '',
                             baseUrl,
                             models: [
                                 { id: modelId, name: modelName, api: modelApi, compat: {} }
@@ -405,36 +444,59 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                 <p className="text-sm font-medium text-muted-foreground leading-relaxed">
                                     Choose the primary intelligence source for **{name || agent.name}**.
                                 </p>
-                                <div className="grid grid-cols-1 gap-4">
+                                <div className="flex overflow-x-auto gap-4 pb-6 pt-2 snap-x custom-scrollbar">
                                     {[
-                                        { id: 'blueprint_shared', name: 'BlueprintS Shared', desc: 'Free tier community intelligence (Rate Limited).', icon: <Share2 className="text-blue-400" /> },
-                                        { id: 'venice', name: 'Venice AI', desc: 'Uncensored, private, and high-performance.', icon: <Cpu className="text-purple-400" /> },
-                                        { id: 'anthropic', name: 'Anthropic Claude', desc: 'Optimized for reasoning and coding.', icon: <Bot className="text-orange-500" /> },
-                                        { id: 'openai', name: 'OpenAI GPT', desc: 'Fast, reliable, and versatile.', icon: <Zap className="text-green-500" /> },
+                                        { id: 'venice', name: 'Venice AI', desc: 'Uncensored & Private', Icon: Cpu, color: 'text-purple-400' },
+                                        { id: 'anthropic', name: 'Anthropic', desc: 'Reasoning & Coding', Icon: Bot, color: 'text-orange-500' },
+                                        { id: 'openai', name: 'OpenAI GPT', desc: 'Versatile & Reliable', Icon: Zap, color: 'text-green-500' },
+                                        { id: 'blueprint_shared', name: 'Blueprint Shared', desc: 'Community Managed', Icon: Share2, color: 'text-blue-400' },
+                                        { id: 'groq', name: 'Groq', desc: 'Ultra-fast LPU', Icon: Zap, color: 'text-orange-400' },
+                                        { id: 'deepseek', name: 'DeepSeek', desc: 'Advanced Reasoning', Icon: Cpu, color: 'text-blue-500' },
+                                        { id: 'mistral', name: 'Mistral IT', desc: 'Efficient Open Models', Icon: Bot, color: 'text-blue-300' },
+                                        { id: 'ollama', name: 'Local (Ollama)', desc: 'Run locally on host', Icon: Terminal, color: 'text-slate-400' },
                                     ].map(p => (
                                         <button
                                             key={p.id}
                                             onClick={() => setConfig({ ...config, provider: p.id })}
-                                            className={`p-6 rounded-3xl border text-left transition-all flex items-center gap-6 ${config.provider === p.id ? 'border-primary bg-primary/5 ring-4 ring-primary/10' : 'border-white/5 bg-white/5 hover:border-white/10'}`}
+                                            className={`shrink-0 w-48 p-6 rounded-[2.5rem] border text-center transition-all flex flex-col items-center gap-4 snap-center relative ${config.provider === p.id ? 'border-primary bg-primary/10 ring-4 ring-primary/10' : 'border-white/5 bg-white/5 hover:border-white/10 hover:bg-white/[0.08]'}`}
                                         >
-                                            <div className="size-12 rounded-2xl bg-white/5 flex items-center justify-center shrink-0">
-                                                {p.icon}
+                                            <div className={`size-16 rounded-3xl bg-white/5 flex items-center justify-center shrink-0 transition-transform ${config.provider === p.id ? 'scale-110' : ''}`}>
+                                                <p.Icon className={p.color} size={32} />
                                             </div>
-                                            <div className="flex-1">
-                                                <h4 className="font-black text-sm uppercase tracking-widest mb-1">{p.name}</h4>
-                                                <p className="text-xs text-muted-foreground font-medium">{p.desc}</p>
+                                            <div>
+                                                <h4 className="font-black text-xs uppercase tracking-widest mb-1 truncate w-full">{p.name}</h4>
+                                                <p className="text-[10px] text-muted-foreground font-medium line-clamp-2">{p.desc}</p>
                                             </div>
-                                            {config.provider === p.id && <div className="size-6 rounded-full bg-primary flex items-center justify-center text-white"><Check size={14} /></div>}
+                                            {config.provider === p.id && (
+                                                <div className="absolute top-4 right-4 size-6 rounded-full bg-primary flex items-center justify-center text-white scale-in-center">
+                                                    <Check size={14} />
+                                                </div>
+                                            )}
                                         </button>
                                     ))}
+                                </div>
+                                <div className="flex justify-center gap-1.5">
+                                    <div className="h-1 w-8 rounded-full bg-primary/20 overflow-hidden">
+                                        <div className="h-full bg-primary transition-all duration-300" style={{ width: '40%' }} />
+                                    </div>
+                                    <div className="h-1 w-1 rounded-full bg-white/10" />
+                                    <div className="h-1 w-1 rounded-full bg-white/10" />
                                 </div>
                             </div>
                         )}
 
-                        {step === 2 && (
-                            <div className="space-y-8">
-                                <div className="space-y-4">
-                                    <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Authentication</label>
+                        {step === 3 && (
+                            <div className="space-y-6">
+                                <section className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-primary">Neural Authentication</label>
+                                        <button
+                                            onClick={() => setStep(4)}
+                                            className="text-[10px] font-black uppercase text-muted-foreground hover:text-white transition-colors"
+                                        >
+                                            Skip for now (Configure via Terminal)
+                                        </button>
+                                    </div>
                                     {config.provider === 'blueprint_shared' ? (
                                         <div className="p-6 rounded-2xl border border-blue-500/20 bg-blue-500/5 flex items-start gap-4">
                                             <div className="p-2 rounded-full bg-blue-500/10 text-blue-400 mt-1">
@@ -445,99 +507,103 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                                                 <p className="text-xs text-blue-200/60 leading-relaxed">
                                                     You are using the Blueprint Community shared pool. No manual API key is required.
                                                 </p>
-                                                <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-blue-300">
-                                                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Rate Limits Active
-                                                </div>
                                             </div>
                                         </div>
                                     ) : (
-                                        <>
+                                        <div className="space-y-4">
                                             <div className="relative">
                                                 <input
                                                     type="password"
                                                     value={config.token}
                                                     onChange={(e) => setConfig({ ...config, token: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-mono text-sm focus:border-primary outline-none transition-all"
-                                                    placeholder={`sk-${config.provider.substring(0, 3)}...`}
-                                                    autoFocus
+                                                    className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-mono text-sm focus:border-primary outline-none transition-all pr-12"
+                                                    placeholder={existingConfig.models?.providers?.[config.provider]?.apiKey ? "Leave blank to keep same key..." : `sk-${config.provider.substring(0, 3)}...`}
                                                 />
-                                                <Key className="absolute right-6 top-1/2 -translate-y-1/2 text-muted-foreground/30" size={20} />
+                                                {existingConfig.models?.providers?.[config.provider]?.apiKey && !config.token ? (
+                                                    <Lock className="absolute right-6 top-1/2 -translate-y-1/2 text-primary/40 animate-pulse" size={20} />
+                                                ) : (
+                                                    <Key className="absolute right-6 top-1/2 -translate-y-1/2 text-muted-foreground/30" size={20} />
+                                                )}
                                             </div>
-                                            <p className="text-[10px] text-muted-foreground font-medium italic">
-                                                * Your keys are encrypted locally before transmission.
-                                            </p>
-                                        </>
+
+                                            {existingConfig.models?.providers?.[config.provider]?.apiKey && (
+                                                <div className="flex items-center gap-2 px-2">
+                                                    <div className="size-2 rounded-full bg-primary shadow-sm shadow-primary/40" />
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Neural Key Present (Masked)</span>
+                                                </div>
+                                            )}
+                                        </div>
                                     )}
-                                </div>
-                            </div>
-                        )}
+                                </section>
 
-                        {step === 3 && (
-                            <div className="space-y-6">
-                                <div className="flex items-center justify-between">
-                                    <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                        Select the neural model for **{name || agent.name}**.
-                                    </p>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={() => setShowAllModels(!showAllModels)}
-                                            className={`text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1 ${showAllModels ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}
-                                        >
-                                            {showAllModels ? <Unlock size={12} /> : <Lock size={12} />}
-                                            {showAllModels ? 'All Models' : 'Filtered'}
-                                        </button>
-                                        <div className="w-px h-3 bg-white/10" />
-                                        <button
-                                            onClick={() => fetchModels(config.provider, config.token)}
-                                            className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
-                                        >
-                                            <Zap size={12} /> Refresh List
-                                        </button>
+                                <section className="space-y-4 pt-4 border-t border-white/5">
+                                    <div className="flex items-center justify-between">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-black uppercase tracking-widest text-primary">Model Selection</label>
+                                            <div className="flex flex-col gap-1">
+                                                {config.modelId && !availableModels.length && (
+                                                    <p className="text-[10px] text-muted-foreground/60 font-medium italic">
+                                                        Current Model: {existingConfig.agents?.defaults?.models?.[`${config.provider}/${config.modelId}`]?.name || config.modelId}
+                                                    </p>
+                                                )}
+                                                <p className="text-[10px] text-muted-foreground/40 leading-relaxed">
+                                                    💡 Tip: Choose models with large context windows (like gpt-4o) if you plan on using many tools or deep project context.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setShowAllModels(!showAllModels)}
+                                                className={`text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1 ${showAllModels ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}
+                                            >
+                                                {showAllModels ? <Unlock size={12} /> : <Lock size={12} />}
+                                                {showAllModels ? 'All' : 'Filtered'}
+                                            </button>
+                                            <button
+                                                onClick={() => fetchModels(config.provider, config.token)}
+                                                disabled={!config.token && config.provider !== 'blueprint_shared'}
+                                                className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80 transition-colors flex items-center gap-1 disabled:opacity-30"
+                                            >
+                                                <Zap size={12} /> Sync
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
 
-                                {fetchingModels ? (
-                                    <div className="h-[200px] flex flex-col items-center justify-center gap-4 bg-white/5 rounded-3xl border border-white/5 animate-pulse">
-                                        <Loader2 size={32} className="animate-spin text-primary" />
-                                        <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Synchronizing with Provider Registry...</p>
-                                    </div>
-                                ) : modelError ? (
-                                    <div className="p-6 rounded-3xl border border-red-500/20 bg-red-500/5 text-center space-y-4">
-                                        <p className="text-xs text-red-400 font-medium">{modelError}</p>
-                                        <button
-                                            onClick={() => setStep(2)}
-                                            className="px-4 py-2 rounded-xl bg-red-500/10 text-red-400 text-[10px] font-black uppercase tracking-widest hover:bg-red-500/20 transition-all"
-                                        >
-                                            Check API Key
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                                        {availableModels
-                                            .filter(m => showAllModels || m.isCompatible)
-                                            .map((m: any) => (
-                                                <button
-                                                    key={m.id}
-                                                    onClick={() => setConfig({ ...config, modelId: m.id })}
-                                                    className={`p-4 rounded-2xl border text-left transition-all flex items-center gap-4 ${config.modelId === m.id ? 'border-primary bg-primary/5' : 'border-white/5 bg-white/5 hover:border-white/10'} ${!m.isCompatible ? 'opacity-50' : ''}`}
-                                                >
-                                                    <div className="size-8 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
-                                                        <Cpu size={16} className={config.modelId === m.id ? 'text-primary' : 'text-muted-foreground'} />
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <h4 className="font-bold text-xs uppercase tracking-widest mb-0.5">{m.name || m.id}</h4>
-                                                            {!m.isCompatible && (
-                                                                <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">Incompatible</span>
-                                                            )}
+                                    {fetchingModels ? (
+                                        <div className="h-[150px] flex flex-col items-center justify-center gap-4 bg-white/5 rounded-3xl border border-white/5">
+                                            <Loader2 size={24} className="animate-spin text-primary" />
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Fetching neural models...</p>
+                                        </div>
+                                    ) : modelError ? (
+                                        <div className="p-6 rounded-2xl border border-red-500/20 bg-red-500/5 text-center">
+                                            <p className="text-[10px] text-red-400 font-bold uppercase tracking-wider">{modelError}</p>
+                                        </div>
+                                    ) : availableModels.length > 0 ? (
+                                        <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
+                                            {availableModels
+                                                .filter(m => showAllModels || m.isCompatible)
+                                                .map((m: any) => (
+                                                    <button
+                                                        key={m.id}
+                                                        onClick={() => setConfig({ ...config, modelId: m.id })}
+                                                        className={`p-3 rounded-xl border text-left transition-all flex items-center gap-3 ${config.modelId === m.id ? 'border-primary bg-primary/5' : 'border-white/5 bg-white/5 hover:border-white/10'} ${!m.isCompatible ? 'opacity-40' : ''}`}
+                                                    >
+                                                        <div className="size-6 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                                                            <Cpu size={12} className={config.modelId === m.id ? 'text-primary' : 'text-muted-foreground'} />
                                                         </div>
-                                                        <p className="text-[10px] text-muted-foreground font-mono opacity-50">{m.id}</p>
-                                                    </div>
-                                                    {config.modelId === m.id && <Check size={14} className="text-primary" />}
-                                                </button>
-                                            ))}
-                                    </div>
-                                )}
+                                                        <div className="flex-1 truncate">
+                                                            <h4 className="font-bold text-[10px] uppercase tracking-widest truncate">{m.name || m.id}</h4>
+                                                        </div>
+                                                        {config.modelId === m.id && <Check size={12} className="text-primary" />}
+                                                    </button>
+                                                ))}
+                                        </div>
+                                    ) : (
+                                        <div className="h-[150px] flex flex-col items-center justify-center text-center p-6 bg-white/5 rounded-3xl border border-dashed border-white/10">
+                                            <p className="text-[10px] font-medium text-muted-foreground italic">Enter API key to synchronize available neural models or select a provider.</p>
+                                        </div>
+                                    )}
+                                </section>
                             </div>
                         )}
 
@@ -729,15 +795,9 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                         {step < steps[steps.length - 1].id ? (
                             <button
                                 onClick={() => {
-                                    if (step === 2 && config.provider !== 'blueprint_shared') {
-                                        fetchModels(config.provider, config.token);
-                                        setStep(3);
-                                    } else {
-                                        setStep(step + 1);
-                                    }
+                                    setStep(step + 1);
                                 }}
-                                disabled={(step === 2 && config.provider !== 'blueprint_shared' && !config.token)}
-                                className="flex-1 py-4 rounded-2xl bg-white text-black hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="flex-1 py-4 rounded-2xl bg-white text-black hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2"
                             >
                                 Continue <ArrowRight size={16} />
                             </button>

@@ -3,27 +3,32 @@ import { z } from 'zod';
 // Note: crypto.ts is NOT exported here because it uses Node.js crypto module
 // Backend and worker should import directly: import { cryptoUtils } from '@eliza-manager/shared/crypto'
 
-export const OPENAI_INCOMPATIBLE_MODELS = new Set([
-    'dall-e-2',
-    'dall-e-3',
-    'gpt-image-1',
+export const INCOMPATIBLE_MODEL_PATTERNS = [
+    /embedding/i,
+    /dall-e/i,
+    /whisper/i,
+    /tts/i,
+    /realtime/i,
+    /moderation/i,
+    /vision/i,
+    /edit/i,
+    /batch/i,
+    /image/i,
+    /transcribe/i,
+    /omni/i,
+    /computer-use/i
+];
 
-    'whisper-1',
-    'gpt-4o-transcribe',
-    'gpt-4o-mini-transcribe',
-    'gpt-4o-realtime-preview',
-    'gpt-4o-mini-realtime-preview',
-
-    'computer-use-preview',
-    'computer-use-preview-v2',
-
-    'omni-moderation-latest'
-]);
-
-export function isOpenAICompatible(id: string) {
-    if (OPENAI_INCOMPATIBLE_MODELS.has(id)) return false;
-    if (id.startsWith('text-embedding')) return false;
+export function isModelCompatible(id: string) {
+    if (INCOMPATIBLE_MODEL_PATTERNS.some(pattern => pattern.test(id))) return false;
     return true;
+}
+
+/**
+ * @deprecated Use isModelCompatible instead
+ */
+export function isOpenAICompatible(id: string) {
+    return isModelCompatible(id);
 }
 
 

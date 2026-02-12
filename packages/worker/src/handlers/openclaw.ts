@@ -44,12 +44,20 @@ export async function startOpenClawAgent(
 
         const agentRootPath = path.join(agentsDataContainerPath, agentId);
         const homeDir = path.join(agentRootPath, 'home');
+        const openclawDir = path.join(homeDir, '.openclaw');
 
-        fs.mkdirSync(homeDir, { recursive: true });
-        fs.mkdirSync(path.join(homeDir, 'workspace'), { recursive: true });
+        fs.mkdirSync(openclawDir, { recursive: true });
+        fs.mkdirSync(path.join(openclawDir, 'workspace'), { recursive: true });
 
-        const configPath = path.join(homeDir, 'openclaw.json');
-        fs.mkdirSync(path.dirname(configPath), { recursive: true });
+        // Ensure the agent (running as node:1000) can write to these volumes
+        try {
+            const { execSync } = require('child_process');
+            execSync(`chown -R 1000:1000 "${homeDir}"`);
+        } catch (e: any) {
+            logger.warn(`Failed to chown agent directory ${homeDir}: ${e.message}`);
+        }
+
+        const configPath = path.join(openclawDir, 'openclaw.json');
 
         const configWithDefaults = {
             ...config,
@@ -85,9 +93,9 @@ export async function startOpenClawAgent(
 
         const env = [
             `HOME=/agent-home`,
-            `OPENCLAW_CONFIG_PATH=/agent-home/openclaw.json`,
+            `OPENCLAW_CONFIG_PATH=/agent-home/.openclaw/openclaw.json`,
             `OPENCLAW_GATEWAY_MODE=local`,
-            `OPENCLAW_WORKSPACE_DIR=/agent-home/workspace`
+            `OPENCLAW_WORKSPACE_DIR=/agent-home/.openclaw/workspace`
         ];
 
 

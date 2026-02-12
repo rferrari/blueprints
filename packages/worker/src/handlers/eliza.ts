@@ -51,6 +51,14 @@ export async function startElizaAgent(agentId: string, config: any) {
     const agentHome = path.join(agentContainerRoot, 'home');
     fs.mkdirSync(agentHome, { recursive: true });
 
+    // Ensure the agent (running as 1000:1000) can write to its home
+    try {
+        const { execSync } = require('child_process');
+        execSync(`chown -R 1000:1000 "${agentHome}"`);
+    } catch (e: any) {
+        logger.warn(`Failed to chown eliza agent directory ${agentHome}: ${e.message}`);
+    }
+
     const characterPath = path.join(agentHome, 'character.json');
     fs.writeFileSync(characterPath, JSON.stringify(finalConfig, null, 2));
 

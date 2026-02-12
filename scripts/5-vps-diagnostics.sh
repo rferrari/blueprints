@@ -79,6 +79,15 @@ else
     echo -e "${YELLOW}⚠️  $DOTENV_PATH not found. Skipping Supabase check.${NC}"
 fi
 
+echo -e "\n${BOLD}🗃️  3.1 Database Schema Integrity Check${NC}"
+echo -e "${BLUE}Comparing live schema with migrations/schema.sql...${NC}"
+# Use the same bun run command but make sure we have the context
+if [ -f "$DOTENV_PATH" ]; then
+    bun run "$SCRIPT_DIR/db-integrity-check.ts" || echo -e "${RED}❌ Schema mismatch detected!${NC}"
+else
+    echo -e "${YELLOW}⚠️  Skipping schema check (no worker .env for credentials).${NC}"
+fi
+
 pause
 
 echo -e "${BOLD}🖥️  4. Blueprints Backend Inspection${NC}"
@@ -94,7 +103,23 @@ if [ -z "$BACKEND_CONTAINER" ]; then
         echo -e "${GREEN}✅ Backend is running natively on port $BACKEND_PORT${NC}"
         echo -e "${BLUE}Health Status:${NC} $BACKEND_HEALTH"
     else
-        echo -e "${RED}❌ Backend is NOT running (neither in Docker nor natively on port $BACKEND_PORT)${NC}"
+        echo -e "${RED}❌ Backend is NOT running on port $BACKEND_PORT${NC}"
+        echo -e "\n${YELLOW}❓ Would you like to test a custom backend API URL? (e.g. your Render URL) [y/N]${NC}"
+        read -r TEST_CUSTOM
+        if [[ "$TEST_CUSTOM" =~ ^[Yy]$ ]]; then
+            echo -n "Enter URL (including http/https): "
+            read -r CUSTOM_URL
+            echo -e "Testing ${BLUE}$CUSTOM_URL/health${NC}..."
+            CUSTOM_HEALTH=$(curl -s -m 5 "$CUSTOM_URL/health" || echo "fail")
+            if [ "$CUSTOM_HEALTH" != "fail" ]; then
+                echo -e "${GREEN}✅ Custom Backend is reachable!${NC}"
+                echo -e "${BLUE}Health Status:${NC} $CUSTOM_HEALTH"
+            else
+                echo -e "${RED}❌ Custom Backend at $CUSTOM_URL/health is NOT reachable.${NC}"
+            fi
+        else
+            echo "Continuing diagnostics..."
+        fi
     fi
 else
     echo -e "${GREEN}✅ Backend is running in Docker (ID: $BACKEND_CONTAINER)${NC}"
@@ -147,10 +172,6 @@ else
 fi
 
 pause
-
-echo -e "${BOLD}🗃️  8. Database Schema Integrity Check${NC}"
-echo -e "${BLUE}Comparing live schema with migrations/schema.sql...${NC}"
-bun run $SCRIPT_DIR/db-integrity-check.ts || echo -e "${RED}❌ Schema mismatch detected!${NC}"
 
 pause
 

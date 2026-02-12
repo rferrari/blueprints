@@ -5,7 +5,8 @@
     "type": "module",
     "scripts": {
         "dev": "bun --watch src/index.ts",
-        "build": "tsc",
+        "validate:openclaw": "bun src/scripts/validate-openclaw.ts",
+        "build": "bun run validate:openclaw && tsc",
         "start": "node dist/src/index.js"
     },
     "dependencies": {

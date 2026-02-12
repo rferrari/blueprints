@@ -5,23 +5,23 @@ import { createClient } from '@/lib/supabase';
 import { Bot, Sparkles, ArrowRight, Github, X } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { useNotification } from '@/components/notification-provider';
 
 function LoginPageContent() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [magicLinkSent, setMagicLinkSent] = useState(false);
     const [isMagicLinkLogin, setIsMagicLinkLogin] = useState(false);
     const supabase = createClient();
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { showNotification } = useNotification();
     const message = searchParams?.get('message');
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        setError(null);
 
         if (isMagicLinkLogin) {
             const { error } = await supabase.auth.signInWithOtp({
@@ -32,7 +32,7 @@ function LoginPageContent() {
             });
 
             if (error) {
-                setError(error.message);
+                showNotification(error.message, 'error');
             } else {
                 setMagicLinkSent(true);
             }
@@ -43,7 +43,7 @@ function LoginPageContent() {
             });
 
             if (error) {
-                setError(error.message);
+                showNotification(error.message, 'error');
             } else {
                 router.push('/dashboard');
             }
@@ -127,11 +127,6 @@ function LoginPageContent() {
                                 )}
                             </div>
 
-                            {error && (
-                                <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4 text-sm font-medium text-destructive animate-in fade-in slide-in-from-top-2 duration-300">
-                                    {error}
-                                </div>
-                            )}
 
                             <button
                                 type="submit"

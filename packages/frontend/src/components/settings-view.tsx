@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { createClient } from '@/lib/supabase';
 import { User, Lock, Save, Loader2, Check, Shield, Mail, Sparkles } from 'lucide-react';
+import { useNotification } from '@/components/notification-provider';
 import UpgradeModal from './upgrade-modal';
 
 interface SettingsViewProps {
@@ -10,9 +11,9 @@ interface SettingsViewProps {
 }
 
 export default function SettingsView({ user }: SettingsViewProps) {
+    const { showNotification } = useNotification();
     const supabase = createClient();
     const [loading, setLoading] = useState(false);
-    const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
     const [fullName, setFullName] = useState(user?.user_metadata?.full_name || '');
     const [password, setPassword] = useState('');
@@ -22,7 +23,6 @@ export default function SettingsView({ user }: SettingsViewProps) {
     const handleUpdateProfile = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        setMessage(null);
 
         const updates: any = {
             data: { full_name: fullName }
@@ -30,12 +30,12 @@ export default function SettingsView({ user }: SettingsViewProps) {
 
         if (password) {
             if (password.length < 6) {
-                setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+                showNotification('Password must be at least 6 characters.', 'error');
                 setLoading(false);
                 return;
             }
             if (password !== confirmPassword) {
-                setMessage({ type: 'error', text: 'Passwords do not match.' });
+                showNotification('Passwords do not match.', 'error');
                 setLoading(false);
                 return;
             }
@@ -49,11 +49,11 @@ export default function SettingsView({ user }: SettingsViewProps) {
                 throw error;
             }
 
-            setMessage({ type: 'success', text: 'Profile updated successfully.' });
+            showNotification('Profile updated successfully.', 'success');
             setPassword('');
             setConfirmPassword('');
         } catch (err: any) {
-            setMessage({ type: 'error', text: err.message || 'Failed to update profile.' });
+            showNotification(err.message || 'Failed to update profile.', 'error');
         } finally {
             setLoading(false);
         }
@@ -194,15 +194,6 @@ export default function SettingsView({ user }: SettingsViewProps) {
                             </div>
                         </div>
 
-                        {message && (
-                            <div className={`p-5 rounded-2xl flex items-center gap-3 ${message.type === 'success'
-                                ? 'bg-green-500/10 border border-green-500/20 text-green-500'
-                                : 'bg-destructive/10 border border-destructive/20 text-destructive'
-                                }`}>
-                                {message.type === 'success' ? <Check size={20} /> : <Shield size={20} />}
-                                <span className="font-bold text-sm">{message.text}</span>
-                            </div>
-                        )}
 
                         <div className="pt-4 flex justify-end">
                             <button

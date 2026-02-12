@@ -17,14 +17,16 @@ import {
     RefreshCw
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import AuthErrorToast from '@/components/auth-error-toast';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useNotification } from '@/components/notification-provider';
 
 export default function LandingPage() {
     const [user, setUser] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const supabase = createClient();
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const { showNotification } = useNotification();
 
     useEffect(() => {
         const checkUser = async () => {
@@ -38,6 +40,22 @@ export default function LandingPage() {
         };
         checkUser();
     }, [supabase, router]);
+
+    useEffect(() => {
+        const error = searchParams.get('error');
+        const errorDescription = searchParams.get('error_description');
+
+        if (error) {
+            const message = errorDescription
+                ? decodeURIComponent(errorDescription.replace(/\+/g, ' '))
+                : 'An authentication error occurred.';
+            showNotification(message, 'error', 'Authentication Failed');
+
+            // Clean up URL
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+        }
+    }, [searchParams, showNotification]);
 
     const FeatureCard = ({ icon: Icon, title, description, delay }: any) => (
         <div
@@ -58,10 +76,6 @@ export default function LandingPage() {
             <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[120px] -translate-y-1/2 animate-pulse" />
             <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-500/10 rounded-full blur-[120px] translate-y-1/2 animate-pulse delay-1000" />
 
-            {/* Error Notifications */}
-            <Suspense>
-                <AuthErrorToast />
-            </Suspense>
 
             {/* Navigation */}
             <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-background/50 backdrop-blur-xl">

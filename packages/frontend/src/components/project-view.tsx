@@ -1,26 +1,22 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Bot, Save, X, Plus, Skull, Play, Square, User, AlertCircle, Loader2, ShieldCheck, Zap, Activity, Cpu, Database, MessageSquare, Terminal } from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
+import { useNotification } from '@/components/notification-provider';
 import { createClient } from '@/lib/supabase';
 import ElizaWizard from '@/components/eliza-wizard';
 import OpenClawWizard from '@/components/openclaw-wizard';
 import ChatInterface from '@/components/chat-interface';
 import ConfirmationModal from '@/components/confirmation-modal';
 
-interface Project {
-    id: string;
-    name: string;
-    tier: string;
-}
-
 interface LocalAgentState {
-    pendingAction?: string; // 'starting' | 'stopping'
+    commandState: 'idle' | 'start_requested' | 'stop_requested' | 'purge_requested' | 'abort_requested';
     commandId?: string;
     error?: string;
     terminateRequestedAt?: number;
     pendingEnabled?: boolean;
+    lastActionAt?: number;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -52,6 +48,7 @@ const generateCoolName = () => {
 
 export default function ProjectView({ projectId, onDataChange, onUpgrade }: { projectId: string; onDataChange?: () => void; onUpgrade?: () => void }) {
     const { session } = useAuth();
+    const { showNotification } = useNotification();
     const [project, setProject] = useState<Project | null>(null);
     const [agents, setAgents] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -60,7 +57,6 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     const [newAgentFramework, setNewAgentFramework] = useState<'eliza' | 'openclaw'>('eliza');
     const [editingAgent, setEditingAgent] = useState<any | null>(null);
     const [chattingAgentId, setChattingAgentId] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
     const [lastCreatedAgentId, setLastCreatedAgentId] = useState<string | null>(null);
     const [isLimitModalOpen, setIsLimitModalOpen] = useState(false);
 
@@ -76,11 +72,20 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     const [localState, setLocalState] = useState<Record<string, LocalAgentState>>({});
 
     const updateLocalState = (agentId: string, update: Partial<LocalAgentState>) => {
-        setLocalState(prev => ({
-            ...prev,
-            [agentId]: { ...prev[agentId], ...update }
-        }));
+        setLocalState(prev => {
+            const next = {
+                ...prev,
+                [agentId]: { ...prev[agentId], ...update }
+            };
+            return next;
+        });
     };
+
+    // Use ref to keep real-time sync subscription stable and aware of latest state
+    const localStateRef = useRef(localState);
+    useEffect(() => {
+        localStateRef.current = localState;
+    }, [localState]);
 
     const fetchProjectAndAgents = useCallback(async (isInitial = false) => {
         if (!session?.access_token) return;
@@ -117,8 +122,25 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                 return true;
             });
             setAgents(filtered);
+
+            // Redundant clearing of commandState if backend already caught up
+            filtered.forEach(a => {
+                const actual = (Array.isArray(a.agent_actual_state) ? a.agent_actual_state[0] : a.agent_actual_state) || { status: 'stopped' };
+                const local = localStateRef.current[a.id];
+                if (!local || local.commandState === 'idle') return;
+
+                const desired = Array.isArray(a.agent_desired_state) ? a.agent_desired_state[0] : a.agent_desired_state;
+                const isStartFulfilled = local.commandState === 'start_requested' && actual.status === 'running';
+                const isStopFulfilled = local.commandState === 'stop_requested' && actual.status === 'stopped';
+                const isAbortFulfilled = local.commandState === 'abort_requested' && (actual.status === 'running' || actual.status === 'stopped');
+                const isPurgeFulfilled = local.commandState === 'purge_requested' && actual.status === 'stopped' && !desired?.purge_at;
+
+                if (isStartFulfilled || isStopFulfilled || isAbortFulfilled || isPurgeFulfilled) {
+                    updateLocalState(a.id, { commandState: 'idle', commandId: undefined });
+                }
+            });
         } catch (err: any) {
-            setError(err.message);
+            showNotification(err.message, 'error');
         } finally {
             setLoading(false);
         }
@@ -167,10 +189,14 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                         // robustly update actual state
                         const currentActual = Array.isArray(a.agent_actual_state) ? a.agent_actual_state[0] : a.agent_actual_state;
 
-                        // If we have a local pending action that matches the new status, clear it
-                        const local = localState[a.id];
-                        if (local?.pendingAction === payload.new.status) {
-                            updateLocalState(a.id, { pendingAction: undefined, commandId: undefined });
+                        // Use Ref for current local state to avoid stale closure and effect churn
+                        const local = localStateRef.current[a.id];
+                        const isStartSuccess = local?.commandState === 'start_requested' && payload.new.status === 'running';
+                        const isStopSuccess = local?.commandState === 'stop_requested' && payload.new.status === 'stopped';
+                        const isAbortSuccess = local?.commandState === 'abort_requested' && (payload.new.status === 'running' || payload.new.status === 'stopped');
+
+                        if (isStartSuccess || isStopSuccess || isAbortSuccess) {
+                            updateLocalState(a.id, { commandState: 'idle', commandId: undefined });
                         }
 
                         return {
@@ -186,7 +212,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         return () => {
             sb.removeChannel(channel);
         };
-    }, [localState, updateLocalState]);
+    }, []); // Empty dependency array - subscription is stable
 
     const handleInstallAgent = async () => {
         if (!newAgentName || !session?.access_token || isInstalling) return;
@@ -212,10 +238,9 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             await fetchProjectAndAgents();
             setIsAdding(false);
             setNewAgentName('');
-            setError(null);
             onDataChange?.();
         } catch (err: any) {
-            setError(err.message);
+            showNotification(err.message, 'error');
         } finally {
             setIsInstalling(false);
         }
@@ -224,12 +249,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         if (!session?.access_token) return;
 
         const commandId = crypto.randomUUID();
-        const action = enabled ? 'starting' : 'stopping';
+        const commandState = enabled ? 'start_requested' : 'stop_requested';
 
         // 1. Optimistic Update
         updateLocalState(agentId, {
-            pendingAction: action,
+            commandState,
             commandId,
+            lastActionAt: Date.now(),
             error: undefined // Clear previous errors
         });
 
@@ -247,15 +273,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
             await fetchProjectAndAgents();
 
-            // 2. Success: Clear pending action ONLY if commandId matches
-            setLocalState(prev => {
-                if (prev[agentId]?.commandId === commandId) {
-                    const { pendingAction, commandId: _, ...rest } = prev[agentId];
-                    return { ...prev, [agentId]: rest };
-                }
-                return prev;
-            });
-
+            // Note: commandState is cleared in real-time sync or by the polling interval if actual matches desired
             onDataChange?.();
         } catch (err: any) {
             // 3. Error: Clear pending action and set Error
@@ -265,15 +283,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                         ...prev,
                         [agentId]: {
                             ...prev[agentId],
-                            pendingAction: undefined,
+                            commandState: 'idle',
                             error: enabled ? 'Start Failed' : 'Stop Failed'
                         }
                     };
                 }
                 return prev;
             });
-            // We do NOT call fetchProjectAndAgents here to avoid overwriting the error state with a stale "running" state immediately
-            // But usually, we might want to ensure consistency. Given the requirement "revert status", clearing pendingAction does that (reverts to actual)
         }
     };
 
@@ -286,7 +302,9 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
         // Mark termination start time for local phase calculation
         updateLocalState(agentId, {
+            commandState: 'purge_requested',
             terminateRequestedAt: Date.now(),
+            lastActionAt: Date.now(),
             error: undefined
         });
 
@@ -312,12 +330,12 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             });
             if (!res.ok) throw new Error('Failed to initiate purge protocol');
             await fetchProjectAndAgents();
-            setError(null);
             onDataChange?.();
         } catch (err: any) {
             // Revert optimistic update on error
             await fetchProjectAndAgents();
             updateLocalState(agentId, { error: 'Termination Failed' });
+            showNotification(err.message, 'error');
         } finally {
             setLoadingAgents(prev => {
                 const next = new Set(prev);
@@ -353,7 +371,6 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
             // Don't fetch immediately - let the polling interval handle it
             // This prevents the agent from flickering back into view
-            setError(null);
             onDataChange?.();
 
             // Clean up purging state after a delay to ensure worker has processed
@@ -372,7 +389,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                 next.delete(agentId);
                 return next;
             });
-            setError(err.message);
+            showNotification(err.message, 'error');
         } finally {
             setLoadingAgents(prev => {
                 const next = new Set(prev);
@@ -397,10 +414,9 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             });
             if (!res.ok) throw new Error('Failed to skip stop timer');
             await fetchProjectAndAgents();
-            setError(null);
             onDataChange?.();
         } catch (err: any) {
-            setError(err.message);
+            showNotification(err.message, 'error');
         }
     };
 
@@ -420,9 +436,10 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
         // 1. Optimistic Update
         updateLocalState(agentId, {
-            pendingAction: 'aborting',
+            commandState: 'abort_requested',
             terminateRequestedAt: undefined,
             commandId,
+            lastActionAt: Date.now(),
             error: undefined,
             pendingEnabled: isStopped ? false : undefined
         });
@@ -445,15 +462,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
             await fetchProjectAndAgents();
 
-            // 2. Success
-            setLocalState(prev => {
-                if (prev[agentId]?.commandId === commandId) {
-                    const { pendingAction, commandId: _, ...rest } = prev[agentId];
-                    return { ...prev, [agentId]: rest };
-                }
-                return prev;
-            });
-
+            // Success state will be cleared by the sync or poller
             onDataChange?.();
         } catch (err: any) {
             // 3. Error
@@ -463,7 +472,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                         ...prev,
                         [agentId]: {
                             ...prev[agentId],
-                            pendingAction: undefined,
+                            commandState: 'idle',
                             error: 'Abort Failed'
                         }
                     };
@@ -596,13 +605,6 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                 </div>
             </div>
 
-            {error && (
-                <div className="p-6 rounded-[2rem] bg-destructive/10 border border-destructive/20 text-destructive flex items-center gap-4 animate-in slide-in-from-top-4 duration-500">
-                    <AlertCircle size={24} />
-                    <span className="font-bold text-sm tracking-tight">{error}</span>
-                    <button onClick={() => setError(null)} className="ml-auto p-2 hover:bg-destructive/10 rounded-full transition-colors"><X size={18} /></button>
-                </div>
-            )}
 
 
             {isAdding && (
@@ -689,29 +691,56 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                     const rawDesired = getOne(agent.agent_desired_state) || { enabled: false, purge_at: null };
                     const desired = { ...rawDesired };
 
+                    // Map raw backend state to user-friendly states (Collapsed Backend States)
+                    const mapBackendStatus = (s: string) => {
+                        switch (s) {
+                            case 'starting': return 'Starting';
+                            case 'running': return 'Running';
+                            case 'stopping': return 'Stopping';
+                            case 'stopped': return 'Stopped';
+                            case 'error': return 'Error';
+                            default: return s.charAt(0).toUpperCase() + s.slice(1);
+                        }
+                    };
+
                     const rawActual = getOne(agent.agent_actual_state) || { status: 'stopped' };
                     const actual = { ...rawActual };
+                    const backendStatus = mapBackendStatus(actual.status);
 
-                    // Apply Local Overrides
-                    if (local.pendingAction === 'aborting') {
-                        desired.purge_at = null;
-                        if (local.pendingEnabled !== undefined) {
-                            desired.enabled = local.pendingEnabled;
+                    // Derive Status Logic (Priority: Command State > Backend State)
+                    let displayStatus = backendStatus;
+                    let isWaiting = false;
+
+                    if (local.commandState && local.commandState !== 'idle') {
+                        // Check for "Waiting for agent..." feedback
+                        if (local.lastActionAt && now.getTime() - local.lastActionAt > 1500) {
+                            isWaiting = true;
+                        }
+
+                        switch (local.commandState) {
+                            case 'start_requested':
+                                displayStatus = 'Starting';
+                                break;
+                            case 'stop_requested':
+                                displayStatus = 'Stopping';
+                                break;
+                            case 'purge_requested':
+                                displayStatus = 'Deleting';
+                                break;
+                            case 'abort_requested':
+                                displayStatus = 'Restoring';
+                                break;
                         }
                     }
 
-                    // Derived Status Logic
-                    let displayStatus = local.pendingAction || actual.status;
+                    // Termination Countdown phases override displayStatus if active
                     let purgeStatus = null;
-
-                    // Termination Phases
                     if (local.terminateRequestedAt && desired.purge_at) {
                         const timeSinceReq = now.getTime() - local.terminateRequestedAt;
 
-                        // Phase A: 0-5s -> Force RUNNING + Stopping In
+                        // Phase A: 0-5s -> Force Stopping In
                         if (timeSinceReq < 5000 && actual.status === 'running') {
-                            displayStatus = 'running';
-                            // Calculate remaining seconds for STOPPING IN
+                            displayStatus = 'Stopping';
                             const rem = Math.ceil((5000 - timeSinceReq) / 1000);
                             purgeStatus = {
                                 label: 'STOPPING IN',
@@ -719,26 +748,16 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                 color: 'text-amber-500 bg-amber-500/10 border-amber-500/20'
                             };
                         }
-                        // Phase B: >5s -> Force STOPPING
+                        // Phase B: >5s -> Force Stopping until backend reflects stopped
                         else if (timeSinceReq >= 5000 && actual.status === 'running') {
-                            // Check for timeout (Phase C)
-                            if (timeSinceReq > 65000) { // 1m + 5s buffer
-                                displayStatus = 'running'; // Revert to actual
-                                // We should ideally set an error here, but doing it in render is side-effecty.
-                                // Instead we just show the error badge if we had one, or let the user try again.
-                                // For now, let's just let it revert to 'running' which implies it failed to stop.
-                            } else {
-                                displayStatus = 'stopping';
-                            }
+                            displayStatus = 'Stopping';
                         }
                     }
 
                     // Existing logic for "Terminating In" (long term countdown)
-                    // We only show this if we are NOT in the "Stopping In" short phase
                     if (!purgeStatus && desired.purge_at) {
                         const purgeDate = new Date(desired.purge_at);
                         if (purgeDate && !isNaN(purgeDate.getTime()) && now < purgeDate) {
-                            // If we are past the 5s buffer, we are in TERMINATING IN
                             const diff = purgeDate.getTime() - now.getTime();
                             const hours = Math.floor(diff / 3600000);
                             const mins = Math.floor((diff % 3600000) / 60000);
@@ -760,7 +779,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                             )}
                             <div className="flex flex-col md:flex-row justify-between items-center gap-6">
                                 <div className="flex items-center gap-6 flex-1">
-                                    <div className={`size-20 rounded-[1.75rem] flex items-center justify-center transition-all duration-700 shadow-2xl ${displayStatus === 'running'
+                                    <div className={`size-20 rounded-[1.75rem] flex items-center justify-center transition-all duration-700 shadow-2xl ${displayStatus === 'Running'
                                         ? 'bg-green-500/10 text-green-500 shadow-green-500/10 scale-110'
                                         : 'bg-white/5 text-muted-foreground/40'
                                         }`}>
@@ -769,10 +788,11 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                     <div>
                                         <div className="flex items-center gap-3 mb-1">
                                             <h4 className="font-black text-2xl tracking-tighter group-hover:text-primary transition-colors">{agent.name}</h4>
-                                            <span className={`size-2 rounded-full ${displayStatus === 'running' ? 'bg-green-500 animate-glow brightness-150' :
-                                                displayStatus === 'starting' ? 'bg-amber-500 animate-pulse' :
-                                                    displayStatus === 'stopping' ? 'bg-amber-500 animate-pulse' :
-                                                        actual.status === 'error' ? 'bg-destructive shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'bg-muted-foreground/30'
+                                            <span className={`size-2 rounded-full ${displayStatus === 'Running' ? 'bg-green-500 animate-glow brightness-150' :
+                                                displayStatus === 'Starting' ? 'bg-amber-500 animate-pulse' :
+                                                    displayStatus === 'Stopping' ? 'bg-amber-500 animate-pulse' :
+                                                        displayStatus === 'Deleting' ? 'bg-amber-500 animate-pulse' :
+                                                            actual.status === 'error' ? 'bg-destructive shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'bg-muted-foreground/30'
                                                 }`} />
                                             {local.error && (
                                                 <span className="px-2 py-0.5 rounded-full bg-destructive/20 text-destructive text-[9px] font-black uppercase tracking-widest border border-destructive/20 ml-2 animate-in fade-in slide-in-from-left-2">
@@ -781,7 +801,16 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                             )}
                                         </div>
                                         <div className="flex items-center gap-4 text-[10px] font-black uppercase tracking-widest">
-                                            <span className={displayStatus === 'running' ? 'text-green-500' : 'text-muted-foreground'}>{displayStatus}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className={displayStatus === 'Running' ? 'text-green-500' : 'text-muted-foreground'}>
+                                                    {displayStatus}
+                                                </span>
+                                                {isWaiting && (
+                                                    <span className="text-amber-500/60 lowercase italic animate-pulse">
+                                                        Wait for agent...
+                                                    </span>
+                                                )}
+                                            </div>
                                             <span className="text-white/20">•</span>
                                             <span className="text-muted-foreground/50">Framework: {agent.framework || 'eliza'}</span>
                                             <span className="text-white/20">•</span>
@@ -797,13 +826,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                                         </div>
                                                     )}
                                                 </div>
-                                            ) : local.pendingAction ? (
+                                            ) : (local.commandState && local.commandState !== 'idle') ? (
                                                 <div className="flex items-center gap-1 text-amber-500">
                                                     <Loader2 size={10} className="animate-spin" />
-                                                    <span>{local.pendingAction.toUpperCase()}...</span>
+                                                    <span>{local.commandState.replace('_requested', '').toUpperCase()}...</span>
                                                 </div>
                                             ) : null}
-                                            {actual.status === 'error' || local.pendingAction ? <span className="text-white/20">•</span> : null}
+                                            {(actual.status === 'error' || (local.commandState && local.commandState !== 'idle')) ? <span className="text-white/20">•</span> : null}
 
                                             {purgeStatus ? (
                                                 <button
@@ -835,7 +864,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
                                 <div className="flex items-center gap-4 p-2 bg-white/5 rounded-[1.5rem] border border-white/5">
                                     <button
-                                        disabled={displayStatus === 'starting' || displayStatus === 'stopping' || !!desired.purge_at}
+                                        disabled={displayStatus === 'Starting' || displayStatus === 'Stopping' || displayStatus === 'Deleting' || !!desired.purge_at}
                                         className={`size-14 rounded-2xl transition-all duration-300 flex items-center justify-center shadow-lg ${desired.purge_at
                                             ? 'bg-muted/10 text-muted-foreground/30 cursor-not-allowed'
                                             : desired.enabled
@@ -853,7 +882,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                             toggleAgent(agent.id, !desired.enabled);
                                         }}
                                     >
-                                        {actual.status === 'starting' || actual.status === 'stopping' ? <Loader2 size={24} className="animate-spin" /> :
+                                        {displayStatus === 'Starting' || displayStatus === 'Stopping' || displayStatus === 'Deleting' ? <Loader2 size={24} className="animate-spin" /> :
                                             (desired.enabled ? <Square size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />)}
                                     </button>
                                     <button
@@ -868,13 +897,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                         <User size={22} />
                                     </button>
                                     <button
-                                        disabled={displayStatus !== 'running'}
+                                        disabled={displayStatus !== 'Running'}
                                         onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
                                             setChattingAgentId(agent.id);
                                         }}
-                                        className={`size-14 rounded-2xl flex items-center justify-center transition-all active:scale-95 ${displayStatus === 'running'
+                                        className={`size-14 rounded-2xl flex items-center justify-center transition-all active:scale-95 ${displayStatus === 'Running'
                                             ? 'text-primary hover:bg-primary/10'
                                             : 'text-muted-foreground/30 cursor-not-allowed'
                                             }`}

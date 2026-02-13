@@ -33,6 +33,13 @@ server.listen(PORT, () => {
 startReconciler();
 startMessageBus();
 
+// Managed Provider Keys: start lease expiration cron
+if (process.env.ENABLE_MANAGED_KEYS === 'true') {
+    import('./lib/lease-cron').then(({ startLeaseCron }) => {
+        startLeaseCron();
+    });
+}
+
 // Global process handling for clean exits
 process.on('SIGTERM', () => {
     logger.info('SIGTERM received. Cleaning up...');

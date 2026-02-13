@@ -22,6 +22,17 @@ export async function startOpenClawAgent(
             status: 'starting'
         });
 
+        // Managed Provider Keys: validate lease before starting
+        if (process.env.ENABLE_MANAGED_KEYS === 'true' && metadata?.lease_id) {
+            const { validateAgentLease, stopAgentForInvalidLease } = await import('../lib/lease-resolver');
+            const leaseResult = await validateAgentLease(agentId, metadata);
+            if (leaseResult && !leaseResult.valid) {
+                logger.warn(`Agent ${agentId}: lease invalid — ${leaseResult.error}`);
+                await stopAgentForInvalidLease(agentId, leaseResult.error || 'Invalid lease');
+                return;
+            }
+        }
+
         const containerName = getAgentContainerName(agentId, 'openclaw');
 
         const hash = [...agentId].reduce((a, c) => a + c.charCodeAt(0), 0);

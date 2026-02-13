@@ -16,6 +16,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import ManagedKeysAdmin from '@/components/managed-keys-admin';
 
 export default function AdminDashboard() {
     const [user, setUser] = useState<any>(null);
@@ -379,6 +380,11 @@ export default function AdminDashboard() {
                             <button className="w-full py-2 bg-destructive text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:opacity-90 transition-opacity">Emergency Stop All Agents</button>
                         </div>
                     </div>
+                </div>
+
+                {/* Section 1.5: Managed Provider Keys */}
+                <div className="glass-card rounded-[3rem] p-10 border border-white/5 mb-8">
+                    <ManagedKeysAdmin />
                 </div>
 
                 {/* Section 2: Leaderboards & Analytics */}

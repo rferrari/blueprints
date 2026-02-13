@@ -112,6 +112,7 @@ export interface Project {
     id: string;
     user_id: string;
     name: string;
+    tier: string;
     created_at: string;
 }
 
@@ -259,3 +260,106 @@ export type UpdateAgentConfigRequest = z.infer<typeof UpdateAgentConfigSchema>;
 export type CreateAgentRequest = z.infer<typeof CreateAgentSchema>;
 export type CreateSupportSessionRequest = z.infer<typeof CreateSupportSessionSchema>;
 export type SupportMessageRequest = z.infer<typeof SupportMessageSchema>;
+
+// --- Managed Provider Keys (MPK) Plugin ---
+
+export const MANAGED_KEYS_FEATURE_FLAG = 'ENABLE_MANAGED_KEYS';
+
+export enum LeaseStatus {
+    ACTIVE = 'active',
+    EXPIRED = 'expired',
+    REVOKED = 'revoked',
+}
+
+/** Full provider config stored as JSONB on managed_provider_keys.config */
+export interface ManagedKeyConfig {
+    default_model: string;
+    fallback_models?: string[];
+    base_url: string;
+    model_api?: string; // 'openai-completions' | 'openai-responses' | 'anthropic-messages'
+    frameworks?: {
+        openclaw?: Record<string, any>;
+        eliza?: Record<string, any>;
+        [key: string]: Record<string, any> | undefined;
+    };
+}
+
+export interface ManagedProviderKey {
+    id: string;
+    provider: string;
+    label: string;
+    encrypted_key: string;
+    active: boolean;
+    config: ManagedKeyConfig;
+    daily_limit_usd?: number;
+    monthly_limit_usd?: number;
+    created_at: string;
+}
+
+export interface KeyLease {
+    id: string;
+    managed_key_id: string;
+    user_id: string;
+    agent_id: string;
+    granted_at: string;
+    expires_at: string;
+    revoked_at?: string;
+    status: LeaseStatus;
+    usage_usd: number;
+    last_used_at?: string;
+    max_agents: number;
+    created_at: string;
+}
+
+/** Tier-based lease defaults */
+export const LEASE_TIER_CONFIG = {
+    [UserTier.FREE]: { duration_days: 7, max_agents: 1, max_usd: 5 },
+    [UserTier.PRO]: { duration_days: 30, max_agents: 3, max_usd: 50 },
+    [UserTier.CUSTOM]: { duration_days: 90, max_agents: 5, max_usd: 200 },
+    [UserTier.ENTERPRISE]: { duration_days: 365, max_agents: 10, max_usd: 1000 },
+};
+
+// --- MPK Zod Schemas ---
+
+export const ManagedKeyConfigSchema = z.object({
+    default_model: z.string(),
+    fallback_models: z.array(z.string()).optional(),
+    base_url: z.string(),
+    model_api: z.string().optional(),
+    frameworks: z.record(z.string(), z.record(z.any())).optional(),
+});
+
+export const CreateManagedKeySchema = z.object({
+    provider: z.string().default('openrouter'),
+    label: z.string().min(1).max(100),
+    api_key: z.string().min(1),
+    config: ManagedKeyConfigSchema.optional().default({
+        default_model: 'openrouter/auto',
+        base_url: 'https://openrouter.ai/api/v1',
+    }),
+    daily_limit_usd: z.number().optional(),
+    monthly_limit_usd: z.number().optional(),
+});
+
+export const UpdateManagedKeySchema = z.object({
+    label: z.string().optional(),
+    active: z.boolean().optional(),
+    config: ManagedKeyConfigSchema.partial().optional(),
+    daily_limit_usd: z.number().nullable().optional(),
+    monthly_limit_usd: z.number().nullable().optional(),
+});
+
+export const RequestLeaseSchema = z.object({
+    provider: z.string().default('openrouter'),
+    agent_id: z.string().uuid(),
+    framework: z.string().default('openclaw'),
+});
+
+export const ExtendLeaseSchema = z.object({
+    additional_days: z.number().int().min(1).max(365).default(7),
+});
+
+export type CreateManagedKeyRequest = z.infer<typeof CreateManagedKeySchema>;
+export type UpdateManagedKeyRequest = z.infer<typeof UpdateManagedKeySchema>;
+export type RequestLeaseRequest = z.infer<typeof RequestLeaseSchema>;
+export type ExtendLeaseRequest = z.infer<typeof ExtendLeaseSchema>;

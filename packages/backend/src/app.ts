@@ -109,6 +109,31 @@ await fastify.register(async (authenticatedInstance) => {
     authenticatedInstance.register(feedbackRoutes, { prefix: '/feedback' });
     authenticatedInstance.register(upgradeFeedbackRoutes, { prefix: '/upgrade-feedback' });
     authenticatedInstance.register(supportRoutes, { prefix: '/support' });
+
+    // Public settings endpoint
+    authenticatedInstance.get('/settings/public', async () => {
+        const { data } = await authenticatedInstance.supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'enable_managed_keys')
+            .single();
+
+        return {
+            enableManagedKeys: (data?.value as any)?.enabled === true
+        };
+    });
+
+    // Managed Provider Keys Plugin — database-flagged
+    const { data: mkSetting } = await authenticatedInstance.supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'enable_managed_keys')
+        .single();
+
+    if ((mkSetting?.value as any)?.enabled === true) {
+        const managedKeysPlugin = (await import('./plugins/managed-keys/index.js')).default;
+        authenticatedInstance.register(managedKeysPlugin);
+    }
 });
 
 const start = async () => {

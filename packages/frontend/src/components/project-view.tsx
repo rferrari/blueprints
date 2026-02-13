@@ -9,6 +9,7 @@ import ElizaWizard from '@/components/eliza-wizard';
 import OpenClawWizard from '@/components/openclaw-wizard';
 import ChatInterface from '@/components/chat-interface';
 import ConfirmationModal from '@/components/confirmation-modal';
+import { Project, UserTier } from '@eliza-manager/shared';
 
 interface LocalAgentState {
     commandState: 'idle' | 'start_requested' | 'stop_requested' | 'purge_requested' | 'abort_requested';
@@ -124,7 +125,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             setAgents(filtered);
 
             // Redundant clearing of commandState if backend already caught up
-            filtered.forEach(a => {
+            filtered.forEach((a: any) => {
                 const actual = (Array.isArray(a.agent_actual_state) ? a.agent_actual_state[0] : a.agent_actual_state) || { status: 'stopped' };
                 const local = localStateRef.current[a.id];
                 if (!local || local.commandState === 'idle') return;
@@ -923,7 +924,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                             : 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive'}`}
                                         title={desired.purge_at ? 'ABORT TERMINATION' : 'Terminate Agent'}
                                     >
-                                        {local.pendingAction === 'aborting' ? <Loader2 size={22} className="animate-spin" /> :
+                                        {(local.commandState === 'abort_requested' || local.commandState === 'purge_requested') ? <Loader2 size={22} className="animate-spin" /> :
                                             <Skull size={22} />
                                         }
                                     </button>

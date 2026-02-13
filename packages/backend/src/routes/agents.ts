@@ -199,7 +199,10 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
 
         const updates: any = { updated_at: new Date().toISOString() };
         if (enabled !== undefined) updates.enabled = enabled;
-        if (config !== undefined) updates.config = cryptoUtils.encryptConfig(config);
+        if (config !== undefined && config !== null) {
+            fastify.log.info({ agentId }, 'Updating agent config');
+            updates.config = cryptoUtils.encryptConfig(config);
+        }
         if (metadata !== undefined) updates.metadata = metadata;
         if (purge_at !== undefined) {
             fastify.log.debug({ agentId, purge_at }, 'Processing purge_at update');

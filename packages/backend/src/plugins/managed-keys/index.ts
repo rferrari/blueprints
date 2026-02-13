@@ -421,6 +421,8 @@ const managedKeysPlugin: FastifyPluginAsync = async (fastify) => {
 
         if (updateError) throw updateError;
 
+        const model = selectedKey.config?.default_model || 'openrouter/auto';
+
         return reply.code(201).send({
             lease_id: lease.id,
             expires_at: lease.expires_at,

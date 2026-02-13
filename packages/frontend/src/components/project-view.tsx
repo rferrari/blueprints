@@ -47,24 +47,34 @@ const COOL_NAMES = [
     'Bit Samurai', 'Cache Vampire'
 ];
 
+const COOL_WORDS = [...new Set(
+    COOL_NAMES.flatMap(n => n.split(' '))
+)];
 
 const generateCoolName = () => {
-    // Split all names into individual words
-    const words = COOL_NAMES.flatMap(name => name.split(' '));
-    // Remove duplicates just in case
-    const uniqueWords = [...new Set(words)];
-
-    // Pick 2 random words
-    const r1 = Math.floor(Math.random() * uniqueWords.length);
-    let r2 = Math.floor(Math.random() * uniqueWords.length);
-
-    // Ensure we don't pick the same word twice
-    while (r2 === r1) {
-        r2 = Math.floor(Math.random() * uniqueWords.length);
-    }
-
-    return `${uniqueWords[r1]} ${uniqueWords[r2]}`;
+    const a = Math.floor(Math.random() * COOL_WORDS.length);
+    let b = Math.floor(Math.random() * COOL_WORDS.length);
+    while (b === a) b = Math.floor(Math.random() * COOL_WORDS.length);
+    return `${COOL_WORDS[a]} ${COOL_WORDS[b]}`;
 };
+
+// const generateCoolName = () => {
+//     // Split all names into individual words
+//     const words = COOL_NAMES.flatMap(name => name.split(' '));
+//     // Remove duplicates just in case
+//     const uniqueWords = [...new Set(words)];
+
+//     // Pick 2 random words
+//     const r1 = Math.floor(Math.random() * uniqueWords.length);
+//     let r2 = Math.floor(Math.random() * uniqueWords.length);
+
+//     // Ensure we don't pick the same word twice
+//     while (r2 === r1) {
+//         r2 = Math.floor(Math.random() * uniqueWords.length);
+//     }
+
+//     return `${uniqueWords[r1]} ${uniqueWords[r2]}`;
+// };
 
 export default function ProjectView({ projectId, onDataChange, onUpgrade }: { projectId: string; onDataChange?: () => void; onUpgrade?: () => void }) {
     const { session } = useAuth();

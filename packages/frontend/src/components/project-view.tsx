@@ -23,11 +23,30 @@ interface LocalAgentState {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 const COOL_NAMES = [
+    // Original
     'Neon Ghost', 'Cypher Stalker', 'Glitch Weaver', 'Midnight Oracle',
     'Quantum Spark', 'Aether Pulse', 'Void Runner', 'Binary Spirit',
     'Silicon Reaper', 'Echo Prime', 'Nexus Core', 'Zenith Auditor',
-    'Solar Flare', 'Lunar Shadow', 'Onyx Sentinel', 'Cobalt Phantom'
+    'Solar Flare', 'Lunar Shadow', 'Onyx Sentinel', 'Cobalt Phantom',
+
+    // Added Cyber / AI
+    'Chrome Warden', 'Pixel Seer', 'Neural Drift', 'Circuit Prophet',
+    'Data Specter', 'Plasma Knight', 'Kernel Watcher', 'Hash Nomad',
+    'Crypto Raven', 'Logic Hunter',
+
+    // Mystic / Cosmic
+    'Astral Monk', 'Obsidian Mage', 'Star Architect', 'Cosmic Whisper',
+    'Gravity Oracle', 'Nova Priest', 'Entropy Sage', 'Void Alchemist',
+
+    // Hacker / Rogue
+    'Root Walker', 'Stack Pirate', 'Zero Day', 'Packet Rogue',
+    'Daemon Rider', 'Shell Phantom', 'Dark Terminal',
+
+    // Fun Dark Tech
+    'Rust Angel', 'Glass Titan', 'Wire Witch', 'Cloud Ronin',
+    'Bit Samurai', 'Cache Vampire'
 ];
+
 
 const generateCoolName = () => {
     // Split all names into individual words

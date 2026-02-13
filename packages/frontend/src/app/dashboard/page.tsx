@@ -12,15 +12,51 @@ import SettingsView from '@/components/settings-view';
 import UpgradeModal from '@/components/upgrade-modal';
 import FeedbackView from '@/components/feedback-view';
 
-const CLUSTER_HINTS = [
-    'Sales Unit B', 'Research Division', 'Alpha Squad', 'Customer Support',
-    'Creative Studio', 'Data Ops', 'Security Detail', 'Trading Bot',
-    'Content Team', 'Dev Cluster'
+const CLUSTER_FIRST = [
+    // Tactical / Ops
+    'Command', 'Ops', 'Mission', 'Signal', 'Execution', 'Control', 'Field', 'Strategic',
+    // Agent / Sci-Fi
+    'Neuron', 'Synthetic', 'Ghost', 'Quantum', 'Cyber', 'Autonomy', 'Protocol', 'Sentinel',
+    // Startup / Hacker
+    'Growth', 'Velocity', 'Chaos', 'Bootstrap', 'Launch', 'Build',
+    // Product / Business
+    'Revenue', 'Market', 'Customer', 'Insights', 'Product', 'Deal', 'Analytics', 'Retention',
+    // Fun / Unhinged
+    'Brain', 'Idea', 'Agent', 'Think', 'Digital', 'Automation'
 ];
 
-const generateClusterName = () => {
-    return CLUSTER_HINTS[Math.floor(Math.random() * CLUSTER_HINTS.length)];
-};
+const CLUSTER_LAST = [
+    // Tactical / Ops
+    'Core', 'Hub', 'Control', 'Room', 'Bay', 'Deck', 'Ops', 'Cell',
+    // Agent / Sci-Fi
+    'Cluster', 'Wing', 'Network', 'Division', 'Grid', 'Vault', 'Node',
+    // Startup / Hacker
+    'Lab', 'Shipyard', 'Launchpad', 'Den', 'Stack',
+    // Product / Business
+    'Engine', 'Radar', 'Forge', 'Factory', 'Studio', 'Desk', 'Hive', 'Unit',
+    // Fun / Slightly Unhinged
+    'Farm', 'Reactor', 'Swarm', 'Nursery', 'Coven', 'Pit'
+];
+
+const pickRandom = (arr: string[]) =>
+    arr[Math.floor(Math.random() * arr.length)];
+
+const generateClusterName = () =>
+    `${pickRandom(CLUSTER_FIRST)} ${pickRandom(CLUSTER_LAST)}`;
+
+// Optional: prevent repeats like "Ops Ops"
+// const generateClusterName = () => {
+//     let first, last;
+
+//     do {
+//         first = pickRandom(CLUSTER_FIRST);
+//         last = pickRandom(CLUSTER_LAST);
+//     } while (first === last);
+
+//     return `${first} ${last}`;
+// };
+
+
 
 export default function DashboardPage() {
     const [user, setUser] = useState<any>(null);
@@ -495,8 +531,8 @@ export default function DashboardPage() {
                                                 type="button"
                                                 onClick={() => setSelectedFramework(fw.id as any)}
                                                 className={`p-4 rounded-2xl border transition-all text-left relative overflow-hidden group ${selectedFramework === fw.id
-                                                        ? 'border-primary bg-primary/10 shadow-[0_0_20px_rgba(var(--primary-rgb),0.1)]'
-                                                        : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/[0.08]'
+                                                    ? 'border-primary bg-primary/10 shadow-[0_0_20px_rgba(var(--primary-rgb),0.1)]'
+                                                    : 'border-white/5 bg-white/5 hover:border-white/20 hover:bg-white/[0.08]'
                                                     }`}
                                             >
                                                 <fw.icon size={18} className={`mb-2 ${selectedFramework === fw.id ? 'text-primary' : 'text-muted-foreground'}`} />

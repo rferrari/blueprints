@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-    CreditCard, Wallet, Send, Bot, Sparkles, Check,
-    Star, MessageSquare, Zap, Loader2, Rocket,
-    ArrowRight, ArrowLeft, Coins, ShieldCheck, AlertCircle,
+    CreditCard, Wallet, Bot, Sparkles,
+    Loader2, Rocket, ArrowRight, ArrowLeft,
     CircleDollarSign, Cpu, Binary, Gem
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
@@ -188,7 +187,7 @@ export default function SurveyFeedbackWizard({ onClose, plan }: SurveyFeedbackWi
                                         ].map(opt => (
                                             <button
                                                 key={opt.id}
-                                                onClick={() => setPricingFeedback(prev => ({ ...prev, [p.name]: opt.id as any }))}
+                                                onClick={() => setPricingFeedback(prev => ({ ...prev, [p.name]: opt.id as 'good' | 'high' | 'low' }))}
                                                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${pricingFeedback[p.name] === opt.id
                                                     ? 'bg-primary text-white'
                                                     : 'bg-white/5 text-muted-foreground hover:bg-white/10'

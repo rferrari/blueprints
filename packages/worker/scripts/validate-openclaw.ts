@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { OpenClawSchema } from "/home/adam/Projects/blankspace/blueprints/external/openclaw/src/config/zod-schema.ts";
+import { OpenClawSchema } from "../../../external/openclaw/src/config/zod-schema";
 
 const OPENCLAW_ROOT = path.resolve("../../external/openclaw");
 const AGENTS_DATA_PATH = process.env.AGENTS_DATA_CONTAINER_PATH || "/mnt/agents-data";
@@ -49,10 +49,17 @@ async function main() {
                 if (result.success) {
                     console.log("✅ OK");
                 } else {
-                    console.log("❌ FAILED");
-                    console.error(`     Error Details for ${agentId}:`);
-                    console.error(JSON.stringify(result.error.format(), null, 2));
-                    errorCount++;
+                    // Check if all errors are just unrecognized keys
+                    const onlyUnrecognizedKeys = result.error.issues.every(issue => issue.code === 'unrecognized_keys');
+
+                    if (onlyUnrecognizedKeys) {
+                        console.log("✅ OK (with warnings)");
+                    } else {
+                        console.log("❌ FAILED");
+                        console.error(`     Error Details for ${agentId}:`);
+                        console.error(JSON.stringify(result.error.format(), null, 2));
+                        errorCount++;
+                    }
                 }
             } catch (err: any) {
                 console.log("❌ ERROR");

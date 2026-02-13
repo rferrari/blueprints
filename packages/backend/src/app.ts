@@ -3,6 +3,9 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import supabasePlugin from './plugins/supabase';
+import settingsPlugin from './plugins/settings';
+import apiKeysPlugin from './plugins/api-keys';
+import mcpPlugin from './plugins/mcp';
 import authPlugin from './plugins/auth';
 import adminPlugin from './plugins/admin';
 import projectRoutes from './routes/projects';
@@ -11,6 +14,7 @@ import adminRoutes from './routes/admin';
 import feedbackRoutes from './routes/feedback';
 import upgradeFeedbackRoutes from './routes/upgrade-feedback';
 import supportRoutes from './routes/support';
+import apiKeysRoutes from './routes/api-keys';
 import rateLimit from '@fastify/rate-limit';
 
 const fastify = Fastify({
@@ -94,6 +98,10 @@ await fastify.register(supabasePlugin, {
     key: SUPABASE_SERVICE_ROLE_KEY,
 });
 
+await fastify.register(settingsPlugin);
+await fastify.register(apiKeysPlugin);
+await fastify.register(mcpPlugin);
+
 // Register routes
 fastify.get('/health', { logLevel: 'silent' }, async () => {
     return { status: 'ok' };
@@ -109,6 +117,7 @@ await fastify.register(async (authenticatedInstance) => {
     authenticatedInstance.register(feedbackRoutes, { prefix: '/feedback' });
     authenticatedInstance.register(upgradeFeedbackRoutes, { prefix: '/upgrade-feedback' });
     authenticatedInstance.register(supportRoutes, { prefix: '/support' });
+    authenticatedInstance.register(apiKeysRoutes, { prefix: '/api-keys' });
 
     // Public settings endpoint
     authenticatedInstance.get('/settings/public', async () => {

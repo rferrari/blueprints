@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { Search, Filter, Download, Check, Loader2, Bot, Zap, Star, Shield, Sparkles, Cpu, Box, Layers, ChevronLeft } from 'lucide-react';
-import { useAuth } from '@/components/auth-provider';
 
 interface AgentTemplate {
     id: string;
@@ -100,7 +99,7 @@ const templates: AgentTemplate[] = [
 ];
 
 export default function Marketplace({ projectId }: { projectId: string }) {
-    const { session } = useAuth();
+    const session: any = null; // Removed useAuth as it was unused and causing errors. Placeholder for session if needed.
     const [search, setSearch] = useState('');
     const [frameworkFilter, setFrameworkFilter] = useState<'all' | 'elizaos' | 'openclaw'>('all');
     const [categoryFilter, setCategoryFilter] = useState('All');

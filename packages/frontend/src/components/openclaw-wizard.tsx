@@ -1,29 +1,28 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase';
-import { UserTier, SecurityLevel, resolveSecurityLevel, TIER_CONFIG, isOpenAICompatible, isModelCompatible } from '@eliza-manager/shared';
-import { Bot, Zap, Shield, Key, MessageSquare, ArrowRight, ArrowLeft, Check, Save, X, Loader2, Terminal, Cpu, Share2, Hash, Send, MessageCircle, Slack, ShieldCheck, Lock, Unlock, Plus, User, Activity } from 'lucide-react';
+import { UserTier, SecurityLevel, isModelCompatible } from '@eliza-manager/shared';
+import { User, Zap, Shield, Share2, MessageSquare, X } from 'lucide-react';
 import { useNotification } from '@/components/notification-provider';
-
-interface OpenClawWizardProps {
-    agent: any;
-    onSave: (config: any, metadata?: any, name?: string) => Promise<void>;
-    onClose: () => void;
-}
+import { Model, OpenClawConfig, OpenClawWizardProps, getOne } from './openclaw-wizard/types';
+import { StepIdentity } from './openclaw-wizard/step-identity';
+import { StepProvider } from './openclaw-wizard/step-provider';
+import { StepNeuralConfig } from './openclaw-wizard/step-neural-config';
+import { StepSecurity } from './openclaw-wizard/step-security';
+import { StepChannels } from './openclaw-wizard/step-channels';
+import { StepChannelConfig } from './openclaw-wizard/step-channel-config';
 
 export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizardProps) {
-    const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
-    const existingConfig = getOne(agent.agent_desired_state)?.config || {};
     const { showNotification } = useNotification();
+    const existingConfig = getOne(agent.agent_desired_state)?.config || {};
     const [step, setStep] = useState(1);
     const [saving, setSaving] = useState(false);
-    const [availableModels, setAvailableModels] = useState<any[]>([]);
+    const [availableModels, setAvailableModels] = useState<Model[]>([]);
     const [fetchingModels, setFetchingModels] = useState(false);
     const [modelError, setModelError] = useState<string | null>(null);
     const [showAllModels, setShowAllModels] = useState(false);
     const [jsonMode, setJsonMode] = useState(false);
-    const [pastedJson, setPastedJson] = useState('');
     const [name, setName] = useState(agent.name || '');
     const [avatar, setAvatar] = useState(getOne(agent.agent_desired_state)?.metadata?.avatar || '');
 
@@ -64,7 +63,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             }
         };
         fetchTier();
-    }, []);
+    }, [supabase]);
 
     // Load initial security level from metadata if exists
     React.useEffect(() => {
@@ -75,7 +74,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     }, [agent]);
 
     // Initial State derived from existing config or defaults
-    const [config, setConfig] = useState({
+    const [config, setConfig] = useState<OpenClawConfig>({
         provider: existingConfig.auth?.profiles?.['default']?.provider || 'venice', // Default to Venice
         mode: 'api_key', // Enforce API Key
         // If editing, we start with an empty token to allow "leave blank to keep same"
@@ -99,14 +98,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         ...existingConfig
     });
 
-    // Auto-sync models when token is pasted or provider changed
-    React.useEffect(() => {
-        if (config.token && config.token.length > 20) {
-            fetchModels(config.provider, config.token);
-        }
-    }, [config.token, config.provider]);
-
-    const fetchModels = async (provider: string, token: string) => {
+    const fetchModels = useCallback(async (provider: string, token: string, currentModelId?: string) => {
         if (!token) return;
         setFetchingModels(true);
         setModelError(null);
@@ -119,20 +111,6 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             else if (provider === 'deepseek') url = 'https://api.deepseek.com/models';
             else if (provider === 'mistral') url = 'https://api.mistral.ai/v1/models';
 
-            //         else if (provider === 'anthropic') {
-            //     const models = [
-            //         { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
-            //         { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' },
-            //         { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' }
-            //     ];
-            //     setAvailableModels(models);
-            //     if (!config.modelId || !models.find((m: any) => m.id === config.modelId)) {
-            //         setConfig((prev: any) => ({ ...prev, modelId: models[0].id }));
-            //     }
-            //     setFetchingModels(false);
-            //     return;
-            // }
-
             if (!url) {
                 setFetchingModels(false);
                 return;
@@ -143,9 +121,6 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             if (provider === 'anthropic') {
                 headers['x-api-key'] = token;
                 headers['anthropic-version'] = '2023-06-01';
-                // headers['content-type'] = 'application/json';
-                // Anthropic might require client-side fetch adjustment or proxy due to CORS
-                // headers['dangerously-allow-browser'] = 'true';
             } else {
                 headers['Authorization'] = `Bearer ${token}`;
             }
@@ -155,42 +130,51 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
             const data = await res.json();
 
             if (data?.data && Array.isArray(data.data)) {
-                let models: any[] = [];
+                let models: Model[] = [];
                 if (provider === 'venice') {
-                    models = data.data.map((m: any) => ({
+                    models = data.data.map((m: { id: string; model_spec?: { name?: string; capabilities?: { supportsFunctionCalling?: boolean } } }) => ({
                         id: m.id,
                         name: m.model_spec?.name || m.id,
                         isCompatible: m.model_spec?.capabilities?.supportsFunctionCalling === true
                     }));
                 } else {
-                    models = data.data.map((m: any) => ({
+                    models = data.data.map((m: { id: string; name?: string; object?: string }) => ({
                         id: m.id,
                         name: m.id,
                         isCompatible: isModelCompatible(m.id)
                     }));
                 }
 
-                models.sort((a: any, b: any) => a.name.localeCompare(b.name));
+                models.sort((a: Model, b: Model) => a.name.localeCompare(b.name));
                 setAvailableModels(models);
 
                 // If current model is not applicable, switch to a compatible one
-                if (!config.modelId || !models.find(m => m.id === config.modelId)) {
+                if (!currentModelId || !models.find(m => m.id === currentModelId)) {
                     const defaultModel = models.find(m => (m.id.includes('70b') || m.id.includes('gpt-4o')) && m.isCompatible) || models.find(m => m.isCompatible) || models[0];
-                    if (defaultModel) setConfig((prev: any) => ({ ...prev, modelId: defaultModel.id }));
+                    if (defaultModel) setConfig((prev: OpenClawConfig) => ({ ...prev, modelId: defaultModel.id }));
                 }
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Fetch models error:', err);
-            setModelError(err.message);
+            const message = err instanceof Error ? err.message : 'Establishment failed';
+            setModelError(message);
         } finally {
             setFetchingModels(false);
         }
-    };
+    }, []);
+
+    // Auto-sync models when token is pasted or provider changed
+    React.useEffect(() => {
+        if (config.token && config.token.length > 20) {
+            fetchModels(config.provider, config.token, config.modelId);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [config.token, config.provider, fetchModels]); // config.modelId intentionally excluded to prevent loop
 
     const steps = [
         { id: 1, title: 'Neural Identity', icon: <User size={20} /> },
         { id: 2, title: 'Intelligence Provider', icon: <Zap size={20} /> },
-        { id: 3, title: 'Neural Configuration', icon: <Cpu size={20} /> },
+        { id: 3, title: 'Neural Configuration', icon: <MessageSquare size={20} /> }, // Icon changed to avoid duplicate Cpu import if possible, or just keep it
         { id: 4, title: 'Permissions & Security', icon: <Shield size={20} /> },
         { id: 5, title: 'Communication Channels', icon: <Share2 size={20} /> },
         { id: 6, title: 'Channel Configuration', icon: <MessageSquare size={20} /> },
@@ -200,7 +184,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         setSaving(true);
         try {
             // Channel Configuration
-            const channelsConfig: any = {};
+            const channelsConfig: Record<string, { enabled: boolean; botToken?: string; token?: string }> = {};
             // Mandatory blueprints_chat is now implicit, do not write to config.
 
             if (config.channels.telegram && config.telegramToken) channelsConfig.telegram = { enabled: true, botToken: config.telegramToken };
@@ -216,37 +200,37 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
             if (config.provider === 'anthropic') {
                 modelId = config.modelId || 'claude-3-5-sonnet-latest';
-                const found = availableModels.find((m: any) => m.id === modelId);
+                const found = availableModels.find((m: Model) => m.id === modelId);
                 modelName = found ? found.name || modelId : 'Claude 3.5 Sonnet';
                 modelApi = 'anthropic-messages';
                 baseUrl = 'https://api.anthropic.com';
             } else if (config.provider === 'venice') {
                 modelId = config.modelId || 'llama-3.3-70b';
-                const found = availableModels.find((m: any) => m.id === modelId);
+                const found = availableModels.find((m: Model) => m.id === modelId);
                 modelName = found ? found.name || modelId : 'Venice Model';
                 modelApi = 'openai-completions';
                 baseUrl = 'https://api.venice.ai/api/v1';
             } else if (config.provider === 'openai') {
                 modelId = config.modelId || 'gpt-4o';
-                const found = availableModels.find((m: any) => m.id === modelId);
+                const found = availableModels.find((m: Model) => m.id === modelId);
                 modelName = found ? found.name || modelId : 'OpenAI Model';
                 modelApi = 'openai-responses';
                 baseUrl = 'https://api.openai.com/v1';
             } else if (config.provider === 'groq') {
                 modelId = config.modelId || 'llama-3.3-70b-versatile';
-                const found = availableModels.find((m: any) => m.id === modelId);
+                const found = availableModels.find((m: Model) => m.id === modelId);
                 modelName = found ? found.name || modelId : 'Groq Model';
                 modelApi = 'openai-completions';
                 baseUrl = 'https://api.groq.com/openai/v1';
             } else if (config.provider === 'deepseek') {
                 modelId = config.modelId || 'deepseek-chat';
-                const found = availableModels.find((m: any) => m.id === modelId);
+                const found = availableModels.find((m: Model) => m.id === modelId);
                 modelName = found ? found.name || modelId : 'DeepSeek Model';
                 modelApi = 'openai-completions';
                 baseUrl = 'https://api.deepseek.com';
             } else if (config.provider === 'mistral') {
                 modelId = config.modelId || 'mistral-large-latest';
-                const found = availableModels.find((m: any) => m.id === modelId);
+                const found = availableModels.find((m: Model) => m.id === modelId);
                 modelName = found ? found.name || modelId : 'Mistral Model';
                 modelApi = 'openai-completions';
                 baseUrl = 'https://api.mistral.ai/v1';
@@ -372,23 +356,12 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
             await onSave(finalConfig, { security_level: securityLevel, avatar }, name);
             onClose();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Failed to save OpenClaw config:', err);
-            showNotification(err.message || 'System error. Operation failed.', 'error');
+            const message = err instanceof Error ? err.message : 'System error. Operation failed.';
+            showNotification(message, 'error');
         } finally {
             setSaving(false);
-        }
-    };
-
-    const handleImportJson = () => {
-        try {
-            const parsed = JSON.parse(pastedJson);
-            // Derive config from parsed JSON
-            setConfig((prev: any) => ({ ...prev, ...parsed }));
-            setJsonMode(false); // Switch back to wizard populated with JSON data
-            // If the JSON had model info, etc, it will be reflected in later steps
-        } catch (err: any) {
-            alert('Invalid JSON: ' + err.message);
         }
     };
 
@@ -426,475 +399,96 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
                     <div className="min-h-[300px] animate-in slide-in-from-right-4 duration-300">
                         {step === 1 && (
-                            <div className="space-y-8">
-                                {!jsonMode ? (
-                                    <>
-                                        <div className="space-y-6">
-                                            <div className="flex flex-col gap-6 items-center">
-                                                <div className="size-32 rounded-3xl bg-white/5 border-4 border-white/10 overflow-hidden relative group/avatar shadow-2xl">
-                                                    {avatar ? (
-                                                        <img src={avatar} className="w-full h-full object-cover" alt="Agent Avatar" />
-                                                    ) : (
-                                                        <div className="w-full h-full flex items-center justify-center text-white/10 bg-gradient-to-br from-white/5 to-transparent">
-                                                            <User size={48} />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="w-full space-y-4">
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black uppercase tracking-widest text-primary">Identity Callsign</label>
-                                                        <input
-                                                            type="text"
-                                                            value={name}
-                                                            onChange={(e) => setName(e.target.value)}
-                                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-bold text-lg focus:border-primary outline-none transition-all placeholder:text-white/10"
-                                                            placeholder="Ghost in the Shell..."
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Avatar Visualization (URL)</label>
-                                                        <input
-                                                            type="text"
-                                                            value={avatar}
-                                                            onChange={(e) => setAvatar(e.target.value)}
-                                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 text-sm focus:border-primary outline-none transition-all placeholder:text-white/10"
-                                                            placeholder="https://images.unsplash.com/photo..."
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="relative py-4">
-                                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
-                                            <div className="relative flex justify-center text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/30"><span className="bg-slate-950 px-4">OR</span></div>
-                                        </div>
-
-                                        <button
-                                            onClick={() => setJsonMode(true)}
-                                            className="w-full p-6 rounded-3xl border border-dashed border-white/10 bg-white/[0.02] hover:bg-white/[0.05] transition-all flex items-center justify-center gap-4 group"
-                                        >
-                                            <Terminal size={20} className="text-muted-foreground group-hover:text-primary transition-colors" />
-                                            <div className="text-left">
-                                                <h4 className="font-black text-[10px] uppercase tracking-widest text-muted-foreground group-hover:text-white transition-colors">Direct Matrix Injection</h4>
-                                                <p className="text-[10px] text-muted-foreground/40 font-medium italic">Paste raw OpenClaw JSON configuration</p>
-                                            </div>
-                                        </button>
-                                    </>
-                                ) : (
-                                    <div className="space-y-6">
-                                        <div className="flex items-center justify-between">
-                                            <label className="text-[10px] font-black uppercase tracking-widest text-primary">Neural Matrix JSON</label>
-                                            <button onClick={() => setJsonMode(false)} className="text-[10px] font-black uppercase text-muted-foreground hover:text-white">Back to Wizard</button>
-                                        </div>
-                                        <textarea
-                                            value={pastedJson}
-                                            onChange={(e) => setPastedJson(e.target.value)}
-                                            rows={12}
-                                            className="w-full bg-black/40 border border-white/10 rounded-3xl p-6 font-mono text-[10px] focus:border-primary outline-none transition-all custom-scrollbar h-[350px]"
-                                            placeholder={`{
-  "auth": { ... },
-  "gateway": { ... },
-  "channels": { ... }
-}`}
-                                        />
-                                        <button
-                                            onClick={handleImportJson}
-                                            disabled={!pastedJson}
-                                            className="w-full py-4 rounded-2xl bg-primary text-white font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all shadow-xl shadow-primary/20"
-                                        >
-                                            <Activity size={16} /> Synchronize Neural Matrix
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
+                            <StepIdentity
+                                avatar={avatar}
+                                setAvatar={setAvatar}
+                                name={name}
+                                setName={setName}
+                                setConfig={setConfig}
+                                setJsonMode={setJsonMode}
+                                jsonMode={jsonMode}
+                            />
                         )}
 
                         {step === 2 && (
-                            <div className="space-y-6">
-                                <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Choose the primary intelligence source for **{name || agent.name}**.
-                                </p>
-                                <div className="flex overflow-x-auto gap-4 pb-6 pt-2 snap-x custom-scrollbar">
-                                    {[
-                                        { id: 'venice', name: 'Venice AI', desc: 'Uncensored & Private', Icon: Cpu, color: 'text-purple-400' },
-                                        { id: 'openrouter', name: 'OpenRouter', desc: 'Unified Intelligence', Icon: Zap, color: 'text-blue-500' },
-                                        { id: 'anthropic', name: 'Anthropic', desc: 'Reasoning & Coding', Icon: Bot, color: 'text-orange-500' },
-                                        { id: 'openai', name: 'OpenAI GPT', desc: 'Versatile & Reliable', Icon: Zap, color: 'text-green-500' },
-                                        ...(mkEnabled ? [{ id: 'blueprint_shared', name: 'Blueprint Shared', desc: 'Strategic Partner Key', Icon: Share2, color: 'text-blue-400' }] : []),
-                                        { id: 'groq', name: 'Groq', desc: 'Ultra-fast LPU', Icon: Zap, color: 'text-orange-400' },
-                                        { id: 'deepseek', name: 'DeepSeek', desc: 'Advanced Reasoning', Icon: Cpu, color: 'text-blue-500' },
-                                        { id: 'mistral', name: 'Mistral IT', desc: 'Efficient Open Models', Icon: Bot, color: 'text-blue-300' },
-                                    ].map(p => (
-                                        <button
-                                            key={p.id}
-                                            onClick={() => setConfig({ ...config, provider: p.id })}
-                                            className={`shrink-0 w-48 p-6 rounded-[2.5rem] border text-center transition-all flex flex-col items-center gap-4 snap-center relative ${config.provider === p.id ? 'border-primary bg-primary/10 ring-4 ring-primary/10' : 'border-white/5 bg-white/5 hover:border-white/10 hover:bg-white/[0.08]'}`}
-                                        >
-                                            <div className={`size-16 rounded-3xl bg-white/5 flex items-center justify-center shrink-0 transition-transform ${config.provider === p.id ? 'scale-110' : ''}`}>
-                                                <p.Icon className={p.color} size={32} />
-                                            </div>
-                                            <div>
-                                                <h4 className="font-black text-xs uppercase tracking-widest mb-1 truncate w-full">{p.name}</h4>
-                                                <p className="text-[10px] text-muted-foreground font-medium line-clamp-2">{p.desc}</p>
-                                            </div>
-                                            {config.provider === p.id && (
-                                                <div className="absolute top-4 right-4 size-6 rounded-full bg-primary flex items-center justify-center text-white scale-in-center">
-                                                    <Check size={14} />
-                                                </div>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                                <div className="flex justify-center gap-1.5">
-                                    <div className="h-1 w-8 rounded-full bg-primary/20 overflow-hidden">
-                                        <div className="h-full bg-primary transition-all duration-300" style={{ width: '40%' }} />
-                                    </div>
-                                    <div className="h-1 w-1 rounded-full bg-white/10" />
-                                    <div className="h-1 w-1 rounded-full bg-white/10" />
-                                </div>
-                            </div>
+                            <StepProvider
+                                name={name || agent.name}
+                                config={config}
+                                setConfig={setConfig}
+                                mkEnabled={mkEnabled}
+                            />
                         )}
 
                         {step === 3 && (
-                            <div className="space-y-6">
-                                <section className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <label className="text-[10px] font-black uppercase tracking-widest text-primary">Neural Authentication</label>
-                                        <button
-                                            onClick={() => setStep(4)}
-                                            className="text-[10px] font-black uppercase text-muted-foreground hover:text-white transition-colors"
-                                        >
-                                            Skip for now (Configure via Terminal)
-                                        </button>
-                                    </div>
-                                    {config.provider === 'blueprint_shared' ? (
-                                        <div className="p-6 rounded-2xl border border-blue-500/20 bg-blue-500/5 flex items-start gap-4">
-                                            <div className="p-2 rounded-full bg-blue-500/10 text-blue-400 mt-1">
-                                                <ShieldCheck size={20} />
-                                            </div>
-                                            <div>
-                                                <h4 className="font-bold text-sm text-blue-100 mb-2">Partner Shared Intelligence</h4>
-                                                <p className="text-xs text-blue-200/60 leading-relaxed mb-4">
-                                                    You are initialized with our official partner **OpenRouter**. We curate the best models and keys automatically for your cluster.
-                                                </p>
-                                                <div className="space-y-2 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                                                    <div className="flex items-center gap-2 text-[10px] font-bold text-blue-300 uppercase italic">
-                                                        <Activity size={12} /> Live Status Protocols
-                                                    </div>
-                                                    <p className="text-[10px] text-blue-200/50 leading-relaxed">
-                                                        • Auto-selection of high-performance models.<br />
-                                                        • Shared pool may experience rate limits during peak usage.<br />
-                                                        • No manual key management required.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            <div className="relative">
-                                                <input
-                                                    type="password"
-                                                    value={config.token}
-                                                    onChange={(e) => setConfig({ ...config, token: e.target.value })}
-                                                    className="w-full bg-white/5 border border-white/5 rounded-2xl px-6 py-4 font-mono text-sm focus:border-primary outline-none transition-all pr-12"
-                                                    placeholder={existingConfig.models?.providers?.[config.provider]?.apiKey ? "Leave blank to keep same key..." : `sk-${config.provider.substring(0, 3)}...`}
-                                                />
-                                                {existingConfig.models?.providers?.[config.provider]?.apiKey && !config.token ? (
-                                                    <Lock className="absolute right-6 top-1/2 -translate-y-1/2 text-primary/40 animate-pulse" size={20} />
-                                                ) : (
-                                                    <Key className="absolute right-6 top-1/2 -translate-y-1/2 text-muted-foreground/30" size={20} />
-                                                )}
-                                            </div>
-
-                                            {existingConfig.models?.providers?.[config.provider]?.apiKey && (
-                                                <div className="flex items-center gap-2 px-2">
-                                                    <div className="size-2 rounded-full bg-primary shadow-sm shadow-primary/40" />
-                                                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Neural Key Present (Masked)</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </section>
-
-                                {config.provider !== 'blueprint_shared' && (
-                                    <section className="space-y-4 pt-4 border-t border-white/5">
-                                        <div className="flex items-center justify-between">
-                                            <div className="space-y-1">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-primary">Model Selection</label>
-                                                <div className="flex flex-col gap-1">
-                                                    {config.modelId && !availableModels.length && (
-                                                        <p className="text-[10px] text-muted-foreground/60 font-medium italic">
-                                                            Current Model: {existingConfig.agents?.defaults?.models?.[`${config.provider}/${config.modelId}`]?.name || config.modelId}
-                                                        </p>
-                                                    )}
-                                                    <p className="text-[10px] text-muted-foreground/40 leading-relaxed">
-                                                        💡 Tip: Choose models with large context windows (like gpt-4o) if you plan on using many tools or deep project context.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <button
-                                                    onClick={() => setShowAllModels(!showAllModels)}
-                                                    className={`text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1 ${showAllModels ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}
-                                                >
-                                                    {showAllModels ? <Unlock size={12} /> : <Lock size={12} />}
-                                                    {showAllModels ? 'All' : 'Filtered'}
-                                                </button>
-                                                <button
-                                                    onClick={() => fetchModels(config.provider, config.token)}
-                                                    disabled={!config.token && config.provider !== 'blueprint_shared'}
-                                                    className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-primary/80 transition-colors flex items-center gap-1 disabled:opacity-30"
-                                                >
-                                                    <Zap size={12} /> Sync
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {fetchingModels ? (
-                                            <div className="h-[150px] flex flex-col items-center justify-center gap-4 bg-white/5 rounded-3xl border border-white/5">
-                                                <Loader2 size={24} className="animate-spin text-primary" />
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Fetching neural models...</p>
-                                            </div>
-                                        ) : modelError ? (
-                                            <div className="p-6 rounded-2xl border border-red-500/20 bg-red-500/5 text-center">
-                                                <p className="text-[10px] text-red-400 font-bold uppercase tracking-wider">{modelError}</p>
-                                            </div>
-                                        ) : availableModels.length > 0 ? (
-                                            <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-                                                {availableModels
-                                                    .filter(m => showAllModels || m.isCompatible)
-                                                    .map((m: any) => (
-                                                        <button
-                                                            key={m.id}
-                                                            onClick={() => setConfig({ ...config, modelId: m.id })}
-                                                            className={`p-3 rounded-xl border text-left transition-all flex items-center gap-3 ${config.modelId === m.id ? 'border-primary bg-primary/5' : 'border-white/5 bg-white/5 hover:border-white/10'} ${!m.isCompatible ? 'opacity-40' : ''}`}
-                                                        >
-                                                            <div className="size-6 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
-                                                                <Cpu size={12} className={config.modelId === m.id ? 'text-primary' : 'text-muted-foreground'} />
-                                                            </div>
-                                                            <div className="flex-1 truncate">
-                                                                <h4 className="font-bold text-[10px] uppercase tracking-widest truncate">{m.name || m.id}</h4>
-                                                            </div>
-                                                            {config.modelId === m.id && <Check size={12} className="text-primary" />}
-                                                        </button>
-                                                    ))}
-                                            </div>
-                                        ) : (
-                                            <div className="h-[150px] flex flex-col items-center justify-center text-center p-6 bg-white/5 rounded-3xl border border-dashed border-white/10">
-                                                <p className="text-[10px] font-medium text-muted-foreground italic">Enter API key to synchronize available neural models or select a provider.</p>
-                                            </div>
-                                        )}
-                                    </section>
-                                )}
-                            </div>
+                            <StepNeuralConfig
+                                config={config}
+                                setConfig={setConfig}
+                                existingConfig={existingConfig}
+                                setStep={setStep}
+                                availableModels={availableModels}
+                                fetchingModels={fetchingModels}
+                                modelError={modelError}
+                                showAllModels={showAllModels}
+                                setShowAllModels={setShowAllModels}
+                                fetchModels={fetchModels}
+                            />
                         )}
 
                         {step === 4 && (
-                            <div className="space-y-6">
-                                <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Configure the operating privileges for **{name || agent.name}**. Higher levels require higher User Tiers.
-                                </p>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    {[
-                                        {
-                                            level: SecurityLevel.STANDARD,
-                                            title: 'Standard',
-                                            icon: <Shield size={24} className="text-green-400" />,
-                                            desc: 'Workspace access and read-only system.'
-                                        },
-                                        {
-                                            level: SecurityLevel.PRO,
-                                            title: 'Professional',
-                                            icon: <Lock size={24} className="text-amber-400" />,
-                                            desc: 'Read-only system access with limited privileges.'
-                                        },
-                                        {
-                                            level: SecurityLevel.ADVANCED,
-                                            title: 'Advanced',
-                                            icon: <Unlock size={24} className="text-red-500" />,
-                                            desc: 'Full container access with elevated privileges.'
-                                        }
-                                    ].map((opt) => {
-                                        const allowed = resolveSecurityLevel(tier, opt.level) === opt.level;
-                                        const isSelected = securityLevel === opt.level;
-
-                                        return (
-                                            <button
-                                                key={opt.level}
-                                                onClick={() => allowed && setSecurityLevel(opt.level)}
-                                                disabled={!allowed}
-                                                className={`p-6 rounded-3xl border text-left transition-all flex flex-col gap-4 relative overflow-hidden ${isSelected
-                                                    ? 'border-primary bg-primary/10 ring-4 ring-primary/10'
-                                                    : allowed
-                                                        ? 'border-white/5 bg-white/5 hover:border-white/10'
-                                                        : 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
-                                                    }`}
-                                            >
-                                                <div className="flex justify-between items-start w-full">
-                                                    <div className="p-3 rounded-2xl bg-white/5">
-                                                        {opt.icon}
-                                                    </div>
-                                                    {isSelected && <div className="text-primary"><Check size={20} /></div>}
-                                                    {!allowed && <div className="text-muted-foreground px-2 py-1 rounded bg-white/5 text-[10px] font-black uppercase">Locked</div>}
-                                                </div>
-                                                <div>
-                                                    <h4 className="font-black text-sm uppercase tracking-widest mb-2">{opt.title}</h4>
-                                                    <p className="text-xs text-muted-foreground leading-relaxed">{opt.desc}</p>
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                                <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs font-medium flex gap-3 items-center">
-                                    <ShieldCheck size={16} />
-                                    <span>
-                                        Your current tier is <strong>{tier.toUpperCase()}</strong>.
-                                        {tier === 'free' && " Upgrade to Pro for Privileged access."}
-                                    </span>
-                                </div>
-                            </div>
+                            <StepSecurity
+                                tier={tier}
+                                securityLevel={securityLevel}
+                                setSecurityLevel={setSecurityLevel}
+                                name={name || agent.name}
+                            />
                         )}
 
                         {step === 5 && (
-                            <div className="space-y-8">
-                                <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Select which communication channels <strong>{name || agent.name}</strong> should be available on.
-                                </p>
-                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {[
-                                        { id: 'telegram', name: 'Telegram', icon: <Send size={20} className="text-blue-400" /> },
-                                        { id: 'discord', name: 'Discord', icon: <Hash size={20} className="text-indigo-400" /> },
-                                        { id: 'whatsapp', name: 'WhatsApp', icon: <MessageCircle size={20} className="text-green-400" /> },
-                                        { id: 'slack', name: 'Slack', icon: <Slack size={20} className="text-amber-400" /> },
-                                    ].map(c => (
-                                        <button
-                                            key={c.id}
-                                            onClick={() => {
-                                                setConfig({
-                                                    ...config,
-                                                    channels: { ...config.channels, [c.id]: !(config.channels as any)[c.id] }
-                                                });
-                                            }}
-                                            className={`p-6 rounded-2xl border transition-all flex flex-col items-center gap-4 text-center ${(config.channels as any)[c.id]
-                                                ? 'border-primary bg-primary/10 text-primary'
-                                                : 'border-white/5 bg-white/5 hover:bg-white/10 text-muted-foreground'
-                                                }`}
-                                        >
-                                            <div className="size-10 rounded-xl bg-white/10 flex items-center justify-center">
-                                                {c.icon}
-                                            </div>
-                                            <span className="font-bold text-xs uppercase tracking-widest">{c.name}</span>
-                                            {(config.channels as any)[c.id] && (
-                                                <div className="absolute top-4 right-4 text-primary">
-                                                    <Check size={14} />
-                                                </div>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
+                            <StepChannels
+                                name={name || agent.name}
+                                config={config}
+                                setConfig={setConfig}
+                            />
                         )}
 
                         {step === 6 && (
-                            <div className="space-y-8 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                                <p className="text-sm font-medium text-muted-foreground leading-relaxed">
-                                    Configure credentials for your active channels.
-                                </p>
-
-                                {Object.values(config.channels).every(v => !v) && (
-                                    <div className="p-6 rounded-2xl border border-dashed border-white/10 text-center text-muted-foreground text-xs">
-                                        Agent will be deployed with mandatory terminal only.
-                                    </div>
-                                )}
-
-                                {config.channels.telegram && (
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><Send size={12} /> Telegram Bot Token</label>
-                                        <input
-                                            type="password"
-                                            value={config.telegramToken}
-                                            onChange={(e) => setConfig({ ...config, telegramToken: e.target.value })}
-                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
-                                            placeholder="123456789:ABCDefgh..."
-                                        />
-                                    </div>
-                                )}
-                                {config.channels.discord && (
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><Hash size={12} /> Discord Bot Token</label>
-                                        <input
-                                            type="password"
-                                            value={config.discordToken}
-                                            onChange={(e) => setConfig({ ...config, discordToken: e.target.value })}
-                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
-                                            placeholder="MTA..."
-                                        />
-                                    </div>
-                                )}
-                                {config.channels.whatsapp && (
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><MessageCircle size={12} /> WhatsApp Business Token</label>
-                                        <input
-                                            type="password"
-                                            value={config.whatsappToken}
-                                            onChange={(e) => setConfig({ ...config, whatsappToken: e.target.value })}
-                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
-                                            placeholder="EAAG..."
-                                        />
-                                    </div>
-                                )}
-                                {config.channels.slack && (
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2"><Slack size={12} /> Slack Bot Token</label>
-                                        <input
-                                            type="password"
-                                            value={config.slackToken}
-                                            onChange={(e) => setConfig({ ...config, slackToken: e.target.value })}
-                                            className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-3 font-mono text-xs focus:border-primary outline-none transition-all"
-                                            placeholder="xoxb-..."
-                                        />
-                                    </div>
-                                )}
-                            </div>
+                            <StepChannelConfig
+                                config={config}
+                                setConfig={setConfig}
+                                existingConfig={existingConfig}
+                            />
                         )}
                     </div>
 
-                    <footer className="mt-12 flex gap-4">
+                    <footer className="mt-10 flex justify-end gap-4 border-t border-white/5 pt-6">
                         {step > 1 && (
                             <button
-                                onClick={() => {
-                                    if (step === 1) return;
-                                    setStep(step - 1);
-                                }}
-                                disabled={step === 1}
-                                className="px-8 py-4 rounded-2xl border border-white/10 hover:bg-white/5 transition-all font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-20"
+                                onClick={() => setStep(step - 1)}
+                                className="px-6 py-3 rounded-2xl hover:bg-white/5 text-muted-foreground font-bold text-xs uppercase tracking-widest transition-colors"
                             >
-                                <ArrowLeft size={16} /> Back
+                                Back
                             </button>
                         )}
-                        {step < steps[steps.length - 1].id ? (
+                        {step < steps.length ? (
                             <button
-                                onClick={() => {
-                                    setStep(step + 1);
-                                }}
-                                className="flex-1 py-4 rounded-2xl bg-white text-black hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2"
+                                onClick={() => setStep(step + 1)}
+                                disabled={step === 1 && !name && !jsonMode}
+                                className="px-8 py-3 rounded-2xl bg-primary hover:opacity-90 active:scale-95 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-primary/20 disabled:opacity-50 disabled:pointer-events-none"
                             >
-                                Continue <ArrowRight size={16} />
+                                Continue
                             </button>
                         ) : (
                             <button
                                 onClick={handleSave}
                                 disabled={saving}
-                                className="flex-1 py-4 rounded-2xl bg-primary text-white hover:opacity-90 active:scale-95 transition-all font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-primary/20 disabled:opacity-50"
+                                className="px-8 py-3 rounded-2xl bg-green-500 hover:bg-green-600 active:scale-95 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-green-500/20 flex items-center gap-2"
                             >
-                                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                                Create Neural Matrix
+                                {saving ? 'Initializing...' : 'Initialize Agent'}
                             </button>
                         )}
                     </footer>
                 </div>
             </div>
-        </div >
+        </div>
     );
 }

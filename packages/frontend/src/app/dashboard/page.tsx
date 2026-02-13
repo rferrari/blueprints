@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, ShoppingBag, Settings, LogOut, Bot, Sparkles, Zap, ChevronRight, Menu, X, Plus, Loader2, Trash2, Check, Shield, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Settings, LogOut, Bot, Sparkles, ChevronRight, Menu, X, Plus, Loader2, Trash2, Check, Shield, MessageSquare, Zap } from 'lucide-react';
 import ProjectView from '@/components/project-view';
 import Marketplace from '@/components/marketplace';
 import ConfirmationModal from '@/components/confirmation-modal';

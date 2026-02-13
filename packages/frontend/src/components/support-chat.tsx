@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Bot, User, ArrowRight, Zap, List, Clock, Shield, Send, Loader2 } from 'lucide-react';
-import Link from 'next/link';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Bot, User, Shield, Send, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 
 interface Message {
@@ -15,65 +14,34 @@ interface Message {
 
 export default function SupportChat() {
     const [messages, setMessages] = useState<Message[]>([]);
-    const [isTyping, setIsTyping] = useState(false);
+    const [isTyping] = useState(false);
     const [inputText, setInputText] = useState('');
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [isConnecting, setIsConnecting] = useState(true);
     const [isSending, setIsSending] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [, setError] = useState<string | null>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const supabase = createClient();
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-    const scrollToBottom = () => {
+    const scrollToBottom = useCallback(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    };
+    }, []);
 
     useEffect(() => {
         const timeout = setTimeout(scrollToBottom, 100);
         return () => clearTimeout(timeout);
-    }, [messages, isTyping]);
+    }, [messages, isTyping, scrollToBottom]);
 
-    // 1. Session Initialization
-    useEffect(() => {
-        const initSession = async () => {
-            try {
-                let savedId = sessionStorage.getItem('support_session_id');
-
-                if (!savedId) {
-                    const res = await fetch(`${API_URL}/support/session`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_agent: navigator.userAgent })
-                    });
-                    if (!res.ok) throw new Error('Failed to initialize session');
-                    const { sessionId } = await res.json();
-                    savedId = sessionId;
-                    sessionStorage.setItem('support_session_id', savedId as string);
-                }
-
-                setSessionId(savedId);
-                await fetchHistory(savedId as string);
-            } catch (err: any) {
-                console.error(err);
-                setError('Neural link synchronization failed. Please refresh.');
-            } finally {
-                setIsConnecting(false);
-            }
-        };
-
-        initSession();
-    }, []);
-
-    // 2. Fetch History & Polling
-    const fetchHistory = async (id: string) => {
+    const fetchHistory = useCallback(async (id: string) => {
         try {
             const res = await fetch(`${API_URL}/support/history/${id}`);
             if (res.ok) {
                 const data = await res.json();
-                const mapped = data.map((m: any) => ({
+                const mapped = data.map((m: { id: string; content: string; sender: 'user' | 'agent' | 'system'; created_at: string; sequence: number }) => ({
                     id: m.id,
                     role: m.sender,
                     content: m.content,
@@ -88,13 +56,45 @@ export default function SupportChat() {
         } catch (err) {
             console.error('Polling failed:', err);
         }
-    };
+    }, [API_URL, messages]);
 
+    // 1. Session Initialization
+    useEffect(() => {
+        const initSession = async () => {
+            try {
+                let savedId = sessionStorage.getItem('support_session_id');
+
+                if (!savedId) {
+                    const res = await fetch(`${API_URL}/support/session`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_agent: navigator.userAgent })
+                    });
+                    if (!res.ok) throw new Error('Failed to initialize session');
+                    const { sessionId: newSessionId } = await res.json();
+                    savedId = newSessionId;
+                    sessionStorage.setItem('support_session_id', savedId as string);
+                }
+
+                setSessionId(savedId);
+                await fetchHistory(savedId as string);
+            } catch (err: unknown) {
+                console.error(err);
+                setError('Neural link synchronization failed. Please refresh.');
+            } finally {
+                setIsConnecting(false);
+            }
+        };
+
+        initSession();
+    }, [API_URL, fetchHistory]);
+
+    // 2. Polling
     useEffect(() => {
         if (!sessionId) return;
         const interval = setInterval(() => fetchHistory(sessionId), 3000);
         return () => clearInterval(interval);
-    }, [sessionId]);
+    }, [sessionId, fetchHistory]);
 
     // 3. Send Message
     const handleSendMessage = async (e?: React.FormEvent) => {
@@ -105,7 +105,6 @@ export default function SupportChat() {
         setInputText('');
         setIsSending(true);
 
-        // Optimistic UI
         const nextSequence = messages.length > 0 ? Math.max(...messages.map(m => m.sequence)) + 1 : 1;
 
         try {
@@ -121,17 +120,12 @@ export default function SupportChat() {
 
             if (!res.ok) {
                 const errData = await res.json();
-                if (res.status === 503) {
-                    // Fallback handled by system message in polling or direct error
-                }
                 throw new Error(errData.message || 'Transmission failed');
             }
 
-            // Trigger immediate refresh
             await fetchHistory(sessionId);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            // Optionally add a local error message
         } finally {
             setIsSending(false);
         }
@@ -148,7 +142,6 @@ export default function SupportChat() {
 
     return (
         <div className="flex flex-col h-full overflow-hidden relative">
-            {/* Chat Area */}
             <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar scroll-smooth">
                 <div className="max-w-3xl mx-auto w-full space-y-6 pb-4">
                     <div className="text-center py-6">
@@ -199,23 +192,9 @@ export default function SupportChat() {
                             )}
                         </div>
                     ))}
-
-                    {isTyping && (
-                        <div className="flex gap-4 justify-start animate-in fade-in duration-300">
-                            <div className="size-8 md:size-10 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center shrink-0 shadow-sm mt-1">
-                                <Bot size={18} className="text-primary" />
-                            </div>
-                            <div className="bg-white/5 p-4 rounded-3xl rounded-tl-sm border border-white/5 flex items-center gap-1.5 h-[46px] shadow-sm">
-                                <span className="size-1.5 rounded-full bg-white/40 animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <span className="size-1.5 rounded-full bg-white/40 animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <span className="size-1.5 rounded-full bg-white/40 animate-bounce" style={{ animationDelay: '300ms' }} />
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
 
-            {/* Input */}
             <div className="p-4 md:p-6 z-40 bg-background/50 backdrop-blur-md border-t border-white/5 shrink-0">
                 <div className="max-w-3xl mx-auto">
                     <form onSubmit={handleSendMessage} className="relative group">

@@ -20,6 +20,7 @@
         "next": "^15.1.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
+        "@eliza-manager/shared": "workspace:*",
         "tailwind-merge": "^3.0.1"
     },
     "devDependencies": {
@@ -30,6 +31,8 @@
         "eslint": "^9.39.1",
         "eslint-config-next": "^15.1.0",
         "eslint-plugin-react-refresh": "^0.5.0",
+        "eslint-plugin-react-hooks": "^5.1.0",
+        "globals": "^15.14.0",
         "postcss": "^8.5.1",
         "tailwindcss": "^3.4.17",
         "typescript": "~5.9.3",

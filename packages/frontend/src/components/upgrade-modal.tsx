@@ -10,7 +10,7 @@ interface UpgradeModalProps {
     currentPlan?: string;
 }
 
-export default function UpgradeModal({ isOpen, onClose, currentPlan = 'free' }: UpgradeModalProps) {
+export default function UpgradeModal({ isOpen, onClose }: UpgradeModalProps) {
     const [applyingPlan, setApplyingPlan] = useState<'Pro' | 'Enterprise' | null>(null);
     const [showSuccess, setShowSuccess] = useState(false);
     const supabase = createClient();

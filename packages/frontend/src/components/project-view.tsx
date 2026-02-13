@@ -1,10 +1,17 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Bot, Save, X, Plus, Skull, Play, Square, User, AlertCircle, Loader2, ShieldCheck, Zap, Activity, Cpu, Database, MessageSquare, Terminal } from 'lucide-react';
+import { Bot, Plus, Skull, Play, Square, User, AlertCircle, Loader2, Activity, Cpu, Database, MessageSquare, Terminal } from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
 import { useNotification } from '@/components/notification-provider';
+import { Project, Agent, AgentDesiredState, AgentActualState } from '@eliza-manager/shared';
+
+interface AgentWithStates extends Agent {
+    agent_desired_state: AgentDesiredState | AgentDesiredState[];
+    agent_actual_state: AgentActualState | AgentActualState[];
+}
 import { createClient } from '@/lib/supabase';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import ElizaWizard from '@/components/eliza-wizard';
 import OpenClawWizard from '@/components/openclaw-wizard';
 import ChatInterface from '@/components/chat-interface';
@@ -18,6 +25,7 @@ interface LocalAgentState {
     terminateRequestedAt?: number;
     pendingEnabled?: boolean;
     lastActionAt?: number;
+    pendingAction?: string;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -80,12 +88,12 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     const { session } = useAuth();
     const { showNotification } = useNotification();
     const [project, setProject] = useState<Project | null>(null);
-    const [agents, setAgents] = useState<any[]>([]);
+    const [agents, setAgents] = useState<AgentWithStates[]>([]);
     const [loading, setLoading] = useState(true);
     const [isAdding, setIsAdding] = useState(false);
     const [newAgentName, setNewAgentName] = useState('');
     const [newAgentFramework, setNewAgentFramework] = useState<'eliza' | 'openclaw'>('eliza');
-    const [editingAgent, setEditingAgent] = useState<any | null>(null);
+    const [editingAgent, setEditingAgent] = useState<AgentWithStates | null>(null);
     const [chattingAgentId, setChattingAgentId] = useState<string | null>(null);
     const [lastCreatedAgentId, setLastCreatedAgentId] = useState<string | null>(null);
     const [isLimitModalOpen, setIsLimitModalOpen] = useState(false);
@@ -94,14 +102,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         isOpen: false,
         agentId: null
     });
-    const [loadingAgents, setLoadingAgents] = useState<Set<string>>(new Set());
     const [purgingAgents, setPurgingAgents] = useState<Set<string>>(new Set());
     const [isInstalling, setIsInstalling] = useState(false);
 
     // robust local state for agent feedback
     const [localState, setLocalState] = useState<Record<string, LocalAgentState>>({});
 
-    const updateLocalState = (agentId: string, update: Partial<LocalAgentState>) => {
+    const updateLocalState = useCallback((agentId: string, update: Partial<LocalAgentState>) => {
         setLocalState(prev => {
             const next = {
                 ...prev,
@@ -109,7 +116,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             };
             return next;
         });
-    };
+    }, []);
 
     // Use ref to keep real-time sync subscription stable and aware of latest state
     const localStateRef = useRef(localState);
@@ -142,7 +149,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             const data = await res.json();
             // Filter out agents that are currently being purged to prevent flickering
             // Also filter out agents with a purge_at in the past
-            const filtered = data.filter((a: any) => {
+            const filtered = data.filter((a: AgentWithStates) => {
                 if (purgingAgents.has(a.id)) return false;
                 const desired = Array.isArray(a.agent_desired_state) ? a.agent_desired_state[0] : a.agent_desired_state;
                 if (desired?.purge_at) {
@@ -154,7 +161,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             setAgents(filtered);
 
             // Redundant clearing of commandState if backend already caught up
-            filtered.forEach((a: any) => {
+            filtered.forEach((a: AgentWithStates) => {
                 const actual = (Array.isArray(a.agent_actual_state) ? a.agent_actual_state[0] : a.agent_actual_state) || { status: 'stopped' };
                 const local = localStateRef.current[a.id];
                 if (!local || local.commandState === 'idle') return;
@@ -169,12 +176,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                     updateLocalState(a.id, { commandState: 'idle', commandId: undefined });
                 }
             });
-        } catch (err: any) {
-            showNotification(err.message, 'error');
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Establishment failed';
+            showNotification(message, 'error');
         } finally {
             setLoading(false);
         }
-    }, [projectId, session, purgingAgents]);
+    }, [projectId, session?.access_token, purgingAgents, showNotification, localStateRef, updateLocalState]);
 
     useEffect(() => {
         fetchProjectAndAgents(true);
@@ -186,7 +194,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     // Auto-open wizard/editor for new agents
     useEffect(() => {
         if (lastCreatedAgentId && agents.length > 0) {
-            const newAgent = agents.find((a: any) => a.id === lastCreatedAgentId);
+            const newAgent = agents.find((a: AgentWithStates) => a.id === lastCreatedAgentId);
             if (newAgent) {
                 setEditingAgent(newAgent);
                 setLastCreatedAgentId(null);
@@ -205,13 +213,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     useEffect(() => {
         const sb = createClient();
 
-        const channel = sb
-            .channel('agent-status-updates')
+        const channel = (sb
+            .channel('agent-status-updates') as RealtimeChannel) // Silencing Supabase internal type conflict
             .on('postgres_changes', {
                 event: '*',
                 schema: 'public',
                 table: 'agent_actual_state',
-            }, (payload: any) => {
+            }, (payload: { new: AgentActualState }) => {
                 if (!payload.new || !payload.new.agent_id) return;
 
                 setAgents((prev) => prev.map(a => {
@@ -242,7 +250,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         return () => {
             sb.removeChannel(channel);
         };
-    }, []); // Empty dependency array - subscription is stable
+    }, [localStateRef, updateLocalState]); // Empty dependency array - subscription is stable
 
     const handleInstallAgent = async () => {
         if (!newAgentName || !session?.access_token || isInstalling) return;
@@ -269,8 +277,9 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             setIsAdding(false);
             setNewAgentName('');
             onDataChange?.();
-        } catch (err: any) {
-            showNotification(err.message, 'error');
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Installation failed';
+            showNotification(message, 'error');
         } finally {
             setIsInstalling(false);
         }
@@ -305,7 +314,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
             // Note: commandState is cleared in real-time sync or by the polling interval if actual matches desired
             onDataChange?.();
-        } catch (err: any) {
+        } catch (err) {
             // 3. Error: Clear pending action and set Error
             setLocalState(prev => {
                 if (prev[agentId]?.commandId === commandId) {
@@ -320,6 +329,8 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                 }
                 return prev;
             });
+            const message = err instanceof Error ? err.message : 'Establishment failed';
+            showNotification(message, 'error');
         }
     };
 
@@ -328,7 +339,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         if (!session?.access_token) return;
 
         // Add loading state
-        setLoadingAgents(prev => new Set(prev).add(agentId));
+        // setLoadingAgents(prev => new Set(prev).add(agentId)); // This variable is not defined
 
         // Mark termination start time for local phase calculation
         updateLocalState(agentId, {
@@ -361,17 +372,18 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             if (!res.ok) throw new Error('Failed to initiate purge protocol');
             await fetchProjectAndAgents();
             onDataChange?.();
-        } catch (err: any) {
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Termination failed';
             // Revert optimistic update on error
             await fetchProjectAndAgents();
             updateLocalState(agentId, { error: 'Termination Failed' });
-            showNotification(err.message, 'error');
+            showNotification(message, 'error');
         } finally {
-            setLoadingAgents(prev => {
-                const next = new Set(prev);
-                next.delete(agentId);
-                return next;
-            });
+            // setLoadingAgents(prev => { // This variable is not defined
+            //     const next = new Set(prev);
+            //     next.delete(agentId);
+            //     return next;
+            // });
         }
     };
 
@@ -379,7 +391,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         if (!session?.access_token) return;
 
         // Add loading state
-        setLoadingAgents(prev => new Set(prev).add(agentId));
+        // setLoadingAgents(prev => new Set(prev).add(agentId)); // This variable is not defined
         setPurgingAgents(prev => new Set(prev).add(agentId));
 
         // Optimistic update - remove agent from list immediately
@@ -411,7 +423,8 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                     return next;
                 });
             }, 5000);
-        } catch (err: any) {
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Purge failed';
             // Revert optimistic update on error
             if (agentToRemove) setAgents(prev => [...prev, agentToRemove]);
             setPurgingAgents(prev => {
@@ -419,13 +432,13 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                 next.delete(agentId);
                 return next;
             });
-            showNotification(err.message, 'error');
+            showNotification(message, 'error');
         } finally {
-            setLoadingAgents(prev => {
-                const next = new Set(prev);
-                next.delete(agentId);
-                return next;
-            });
+            // setLoadingAgents(prev => { // This variable is not defined
+            //     const next = new Set(prev);
+            //     next.delete(agentId);
+            //     return next;
+            // });
         }
     };
 
@@ -445,8 +458,9 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
             if (!res.ok) throw new Error('Failed to skip stop timer');
             await fetchProjectAndAgents();
             onDataChange?.();
-        } catch (err: any) {
-            showNotification(err.message, 'error');
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Start failed';
+            showNotification(message, 'error');
         }
     };
 
@@ -457,7 +471,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
         // Determine if we need to force disable (if currently stopped)
         const agent = agents.find(a => a.id === agentId);
-        const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
+        const getOne = <T,>(val: T | T[]): T => (Array.isArray(val) ? val[0] : val);
         const rawActual = agent ? (getOne(agent.agent_actual_state) || { status: 'stopped' }) : { status: 'stopped' };
 
         // Critical Fix: If actual status is stopped, we MUST ensure enabled=false is sent
@@ -475,7 +489,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         });
 
         try {
-            const body: any = { purge_at: null };
+            const body: Partial<AgentDesiredState> = { purge_at: null };
             // Explicitly force enabled=false if it's not running, to prevent "Stop -> Start" race
             if (isStopped) body.enabled = false;
 
@@ -494,7 +508,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
 
             // Success state will be cleared by the sync or poller
             onDataChange?.();
-        } catch (err: any) {
+        } catch {
             // 3. Error
             setLocalState(prev => {
                 if (prev[agentId]?.commandId === commandId) {
@@ -512,26 +526,22 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
         }
     };
 
-    const saveAgentConfig = async (config: any, metadata?: any, name?: string) => {
+    const saveAgentConfig = async (config: Record<string, unknown>, metadata?: Record<string, unknown>, name?: string) => {
         if (!editingAgent || !session?.access_token) return;
-        try {
-            const body: any = { config };
-            if (metadata) body.metadata = metadata;
-            if (name) body.name = name;
+        const body: Partial<AgentDesiredState> & { name?: string } = { config };
+        if (metadata) body.metadata = metadata;
+        if (name) body.name = name;
 
-            const res = await fetch(`${API_URL}/agents/${editingAgent.id}/config`, {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify(body)
-            });
-            if (!res.ok) throw new Error('Failed to save config');
-            await fetchProjectAndAgents();
-        } catch (err: any) {
-            throw err;
-        }
+        const res = await fetch(`${API_URL}/agents/${editingAgent.id}/config`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error('Failed to save config');
+        await fetchProjectAndAgents();
     };
 
     if (loading && agents.length === 0) {
@@ -543,7 +553,8 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
     }
 
     const limits: Record<string, number> = { 'free': 1, 'pro': 10, 'enterprise': 1000 };
-    const tierLimit = project ? limits[project.tier] || 1 : 1;
+    const projectTier = (project?.tier || 'free').toLowerCase();
+    const tierLimit = limits[projectTier] || 1;
     const isAtLimit = agents.length >= tierLimit;
 
     return (
@@ -710,9 +721,9 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                     </div>
                 )}
 
-                {agents.map((agent: any) => {
+                {agents.map((agent: AgentWithStates) => {
                     // Robust state extraction (handle both array and object from Supabase joins)
-                    const getOne = (val: any) => (Array.isArray(val) ? val[0] : val);
+                    const getOne = <T,>(val: T | T[]): T => (Array.isArray(val) ? val[0] : val);
                     const now = new Date();
 
                     const local = localState[agent.id] || {};

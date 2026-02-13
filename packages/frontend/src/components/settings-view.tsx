@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase';
 import { User, Lock, Save, Loader2, Check, Shield, Mail, Sparkles } from 'lucide-react';
 import { useNotification } from '@/components/notification-provider';
 import UpgradeModal from './upgrade-modal';
+import ApiKeyManager from './api-key-manager';
 
 interface SettingsViewProps {
     user: any;
@@ -209,12 +210,16 @@ export default function SettingsView({ user }: SettingsViewProps) {
                 </div>
             </div>
 
+
+            {/* MCP API Keys */}
+            <ApiKeyManager />
+
             {/* Upgrade Modal */}
             <UpgradeModal
                 isOpen={isUpgradeModalOpen}
                 onClose={() => setIsUpgradeModalOpen(false)}
                 currentPlan={tier}
             />
-        </div>
+        </div >
     );
 }

@@ -204,6 +204,172 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
             }
         );
 
+        // --- NEW TOOLS REQUESTED ---
+
+        // 6. CREATE AGENT
+        server.tool(
+            'create_agent',
+            'Create a new agent in a project',
+            {
+                project_id: z.string().uuid(),
+                name: z.string().min(1),
+                framework: z.enum(['eliza', 'openclaw']).default('openclaw'),
+                config: z.record(z.any()).optional()
+            },
+            async ({ project_id, name, framework, config }) => {
+                // 1. Verify Project Ownership
+                const { data: project } = await fastify.supabase
+                    .from('projects')
+                    .select('user_id')
+                    .eq('id', project_id)
+                    .single();
+
+                if (!project || project.user_id !== userId) throw new Error('Unauthorized or project not found');
+
+                // 2. Create Agent
+                const { data: agent, error: aErr } = await fastify.supabase
+                    .from('agents')
+                    .insert({ project_id, name, framework })
+                    .select('id')
+                    .single();
+
+                if (aErr) throw aErr;
+
+                // 3. Create Desired State
+                const encryptedConfig = config ? cryptoUtils.encryptConfig(config) : {};
+                await fastify.supabase
+                    .from('agent_desired_state')
+                    .insert({ agent_id: agent.id, config: encryptedConfig, enabled: false });
+
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'create_agent', agentId: agent.id, status: 'success' });
+
+                return {
+                    content: [{ type: 'text', text: `Agent '${name}' created with ID: ${agent.id}` }]
+                };
+            }
+        );
+
+        // 7. EDIT AGENT CONFIG
+        server.tool(
+            'edit_agent_config',
+            'Update an agent\'s configuration',
+            {
+                agent_id: z.string().uuid(),
+                config: z.record(z.any())
+            },
+            async ({ agent_id, config }) => {
+                // 1. Verify Ownership
+                const { data: agent } = await fastify.supabase
+                    .from('agents')
+                    .select('project_id')
+                    .eq('id', agent_id)
+                    .single();
+
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                // 2. Update Config
+                const encryptedConfig = cryptoUtils.encryptConfig(config);
+                await fastify.supabase
+                    .from('agent_desired_state')
+                    .update({ config: encryptedConfig, updated_at: new Date().toISOString() })
+                    .eq('agent_id', agent_id);
+
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'edit_agent_config', agentId: agent_id, status: 'success' });
+
+                return {
+                    content: [{ type: 'text', text: `Configuration updated for agent ${agent_id}` }]
+                };
+            }
+        );
+
+        // 8. REMOVE AGENT
+        server.tool(
+            'remove_agent',
+            'Delete an agent permanently',
+            { agent_id: z.string().uuid() },
+            async ({ agent_id }) => {
+                // 1. Verify Ownership
+                const { data: agent } = await fastify.supabase
+                    .from('agents')
+                    .select('project_id')
+                    .eq('id', agent_id)
+                    .single();
+
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                // 2. Delete
+                await fastify.supabase.from('agents').delete().eq('id', agent_id);
+
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'remove_agent', agentId: agent_id, status: 'success' });
+
+                return {
+                    content: [{ type: 'text', text: `Agent ${agent_id} removed permanently.` }]
+                };
+            }
+        );
+
+        // 9. SEND MESSAGE
+        server.tool(
+            'send_message',
+            'Send a message to an agent\'s conversation log',
+            {
+                agent_id: z.string().uuid(),
+                content: z.string().min(1)
+            },
+            async ({ agent_id, content }) => {
+                // 1. Verify Ownership
+                const { data: agent } = await fastify.supabase
+                    .from('agents')
+                    .select('project_id')
+                    .eq('id', agent_id)
+                    .single();
+
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                // 2. Insert Message
+                await fastify.supabase
+                    .from('agent_conversations')
+                    .insert({
+                        agent_id,
+                        user_id: userId,
+                        content,
+                        sender: 'user'
+                    });
+
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'send_message', agentId: agent_id, status: 'success' });
+
+                return {
+                    content: [{ type: 'text', text: `Message delivered to agent ${agent_id}` }]
+                };
+            }
+        );
+
+        // 10. ACCOUNT & BILLING (PLACEHOLDERS)
+        server.tool(
+            'account_register',
+            'Register for a new account (Placeholder)',
+            { email: z.string() },
+            async () => {
+                return { content: [{ type: 'text', text: 'Account registration is currently handled via the web dashboard at https://blueprints.ai/signup' }] };
+            }
+        );
+
+        server.tool(
+            'pay_upgrade',
+            'Upgrade account tier (Placeholder)',
+            { tier: z.enum(['pro', 'enterprise']) },
+            async ({ tier }) => {
+                return { content: [{ type: 'text', text: `Upgrading to ${tier.toUpperCase()} is handled via the dashboard billing section. Please visit https://blueprints.ai/upgrade` }] };
+            }
+        );
+
+
         // --- RESOURCES ---
 
         // 4. AGENT CONFIG RESOURCE

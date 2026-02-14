@@ -20,6 +20,7 @@ export default function ChatInterface({ agentId, onClose }: { agentId: string; o
     const [fetching, setFetching] = useState(true);
     const [thinkingTime, setThinkingTime] = useState(0);
     const [agentModel, setAgentModel] = useState<string>('LLM');
+    const [agentName, setAgentName] = useState<string>('Neural Agent');
     const scrollRef = useRef<HTMLDivElement>(null);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -116,23 +117,22 @@ export default function ChatInterface({ agentId, onClose }: { agentId: string; o
 
     const fetchAgentDetails = async () => {
         try {
-            const { data, error } = await supabase
-                .from('agent_desired_state')
-                .select('config')
-                .eq('agent_id', agentId)
-                .single();
+            // Fetch name from agents table and config from desired state
+            const [agentRes, configRes] = await Promise.all([
+                supabase.from('agents').select('name').eq('id', agentId).single(),
+                supabase.from('agent_desired_state').select('config').eq('agent_id', agentId).single()
+            ]);
 
-            if (error) throw error;
-            if (data?.config) {
-                // Config is likely JSON or needs decryption if it's the encrypted version
-                // For the frontend, we usually have a way to view it
-                // Let's assume for now it's accessible or if it's encrypted, we display a generic 'Agent' name
-                const config = data.config;
+            if (agentRes.data?.name) {
+                setAgentName(agentRes.data.name);
+            }
+
+            if (configRes.data?.config) {
+                const config = configRes.data.config;
                 const primaryModel = config.agents?.defaults?.model?.primary ||
                     config.models?.providers?.venice?.models?.[0]?.id ||
                     'AI';
 
-                // Clean up model name (e.g., 'venice/llama-3.3-70b' -> 'Llama-3.3-70B')
                 const modelName = primaryModel.split('/').pop().toUpperCase();
                 setAgentModel(modelName);
             }
@@ -228,6 +228,8 @@ export default function ChatInterface({ agentId, onClose }: { agentId: string; o
                     <div>
                         <h3 className="font-black text-sm uppercase tracking-widest text-white flex items-center gap-2">
                             Agent Neural Link
+                            <span className="text-white/20">|</span>
+                            <span className="text-primary">{agentName}</span>
                             <span className="size-2 rounded-full bg-green-500 animate-pulse" />
                         </h3>
                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Secure Multi-tenant Socket</p>

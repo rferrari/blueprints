@@ -14,10 +14,10 @@ export async function handleUserMessage(payload: any) {
     logger.info(`Message Bus: [${id}] Processing message for agent ${agent_id}`);
 
     try {
-        // Fetch agent framework
+        // Fetch agent framework and project_id
         const { data: agent } = await supabase
             .from('agents')
-            .select('framework')
+            .select('framework, project_id')
             .eq('id', agent_id)
             .single();
 
@@ -56,7 +56,7 @@ Examples:
 
             const handler = getHandler(agent.framework);
             if (handler?.runCommand) {
-                output = await handler.runCommand(agent_id, command);
+                output = await handler.runCommand(agent_id, command, agent.project_id);
             } else {
                 throw new Error(`Framework ${agent.framework} does not support terminal commands`);
             }

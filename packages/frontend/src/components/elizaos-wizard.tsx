@@ -655,6 +655,22 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
                                         </div>
                                         <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-black uppercase tracking-widest animate-pulse">Live Link Active</span>
                                     </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div className="p-6 rounded-3xl bg-white/5 border border-white/5">
+                                            <span className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">CPU Load</span>
+                                            <span className="text-xl font-black text-white">{actual?.stats?.cpu || "1.5%"}</span>
+                                        </div>
+                                        <div className="p-6 rounded-3xl bg-white/5 border border-white/5">
+                                            <span className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Memory Matrix</span>
+                                            <span className="text-xl font-black text-white">{actual?.stats?.memory?.split(' / ')[0] || "700MB"}</span>
+                                        </div>
+                                        <div className="p-6 rounded-3xl bg-white/5 border border-white/5">
+                                            <span className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Inference Latency</span>
+                                            <span className="text-xl font-black text-white">45ms</span>
+                                        </div>
+                                    </div>
+
                                     <div className="bg-black/60 rounded-[2.5rem] p-8 font-mono text-xs leading-relaxed border border-white/5 shadow-inner">
                                         {logs.map((log, i) => (
                                             <div key={i} className="flex gap-4 mb-2 group">
@@ -668,20 +684,6 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
                                         <div className="flex gap-4 animate-pulse">
                                             <span className="text-muted-foreground/30 select-none">{logs.length + 1}</span>
                                             <span className="text-primary font-black">_</span>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <div className="p-6 rounded-3xl bg-white/5 border border-white/5">
-                                            <span className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">CPU Load</span>
-                                            <span className="text-xl font-black text-white">12.4%</span>
-                                        </div>
-                                        <div className="p-6 rounded-3xl bg-white/5 border border-white/5">
-                                            <span className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Memory Matrix</span>
-                                            <span className="text-xl font-black text-white">240MB</span>
-                                        </div>
-                                        <div className="p-6 rounded-3xl bg-white/5 border border-white/5">
-                                            <span className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Inference Latency</span>
-                                            <span className="text-xl font-black text-white">45ms</span>
                                         </div>
                                     </div>
                                 </div>
@@ -742,6 +744,6 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
                     </div>
                 </footer>
             </div>
-        </div>
+        </div >
     );
 }

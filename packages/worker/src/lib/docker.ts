@@ -60,6 +60,10 @@ export const docker = {
         };
     },
 
+    async getStats(name: string) {
+        return this._request('GET', `/containers/${name}/stats?stream=false`);
+    },
+
     async createContainer(config: any) {
         const { name, ...rest } = config;
         const data = await this._request('POST', `/containers/create?name=${name}`, rest);

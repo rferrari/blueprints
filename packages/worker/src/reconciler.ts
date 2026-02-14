@@ -151,6 +151,23 @@ export async function reconcile() {
                 } else {
                     // Running and config matches, just update hash if missing (restart recovery)
                     if (!lastHash) configHashes.set(agent.id, currentHash);
+
+                    // Collect Runtime Stats (Every ~10s)
+                    const lastSync = actual?.last_sync ? new Date(actual.last_sync).getTime() : 0;
+                    if (now.getTime() - lastSync > 10000) {
+                        try {
+                            const containerName = getAgentContainerName(agent.id, agent.framework, agent.project_id);
+                            const rawStats = await docker.getStats(containerName);
+                            const stats = calculateStats(rawStats);
+
+                            await supabase.from('agent_actual_state').update({
+                                stats,
+                                last_sync: now.toISOString()
+                            }).eq('agent_id', agent.id);
+                        } catch (err: any) {
+                            // Don't log spam for stats failures
+                        }
+                    }
                 }
 
             } else {
@@ -258,4 +275,35 @@ export function startReconciler() {
     reconcile();
     // cleanupOrphanContainers();
     startStateListener();
+}
+
+function calculateStats(stats: any) {
+    if (!stats || !stats.cpu_stats || !stats.memory_stats) return { cpu: '0%', memory: '0 / 0' };
+
+    // CPU
+    const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+    const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+    const numberCpus = stats.cpu_stats.online_cpus || (stats.cpu_stats.cpu_usage.percpu_usage || []).length || 1;
+    let cpuPercent = 0.0;
+    if (systemDelta > 0 && cpuDelta > 0) {
+        cpuPercent = (cpuDelta / systemDelta) * numberCpus * 100.0;
+    }
+
+    // Memory
+    const usedMemory = stats.memory_stats.usage - (stats.memory_stats.stats?.cache || 0);
+    const limitMemory = stats.memory_stats.limit;
+
+    // Formatting helper
+    const formatBytes = (bytes: number) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    return {
+        cpu: `${cpuPercent.toFixed(1)}%`,
+        memory: `${formatBytes(usedMemory)} / ${formatBytes(limitMemory)}`
+    };
 }

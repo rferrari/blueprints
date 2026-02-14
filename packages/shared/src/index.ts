@@ -158,6 +158,10 @@ export interface AgentActualState {
     error_message?: string;
     effective_security_tier?: string; // Audit trail
     version?: string;
+    stats?: {
+        cpu: string;
+        memory: string;
+    };
 }
 
 // API Request/Response Schemas

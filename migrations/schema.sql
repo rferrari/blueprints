@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS public.runtimes (
     name TEXT UNIQUE NOT NULL,
     eliza_api_url TEXT NOT NULL,
     auth_token TEXT NOT NULL,
+    version TEXT DEFAULT 'latest',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

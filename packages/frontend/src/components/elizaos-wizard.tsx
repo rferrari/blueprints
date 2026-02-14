@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Save, X, Plus, Skull, Code, Layout, Loader2, Settings, Sparkles, Cpu, Globe, MessageSquare, Activity, User, Database, Zap, Shield, Bot } from 'lucide-react';
+import { Save, X, Plus, Skull, Code, Layout, Loader2, Settings, Sparkles, Cpu, Globe, MessageSquare, Activity, User, Database, Zap, Shield, Bot, Search, AlertTriangle } from 'lucide-react';
+import { useElizaPlugins } from '@/hooks/use-eliza-plugins';
+import { useRequiredSecrets } from '@/hooks/use-eliza-plugin-details';
 
 interface ElizaOSWizardProps {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -13,13 +15,7 @@ interface ElizaOSWizardProps {
     onClose: () => void;
 }
 
-const availablePlugins = [
-    { id: '@elizaos/plugin-bootstrap', name: 'Bootstrap', description: 'Core actions and message processing.' },
-    { id: '@elizaos/plugin-twitter', name: 'Twitter', description: 'Interact with the X (Twitter) platform.' },
-    { id: '@elizaos/plugin-discord', name: 'Discord', description: 'Seamless Discord integration.' },
-    { id: '@elizaos/plugin-sql', name: 'SQL', description: 'Database and persistence layer.' },
-    { id: '@elizaos/plugin-coingecko', name: 'CoinGecko', description: 'Real-time crypto market data.' },
-];
+// availablePlugins removed, using dynamic fetch from hook
 
 export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaOSWizardProps) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,6 +71,18 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
     const [newSecretKey, setNewSecretKey] = useState('');
     const [newSecretValue, setNewSecretValue] = useState('');
 
+    const [pluginSearch, setPluginSearch] = useState('');
+    const { data: registryPlugins, isLoading: isLoadingPlugins } = useElizaPlugins();
+    // Default to existing plugins config or basic ones if registry fetch fails
+    const availablePlugins = registryPlugins || [];
+
+    // Get required secrets for selected plugins
+    const { requiredSecrets } = useRequiredSecrets(config.plugins || []);
+
+    const filteredPlugins = availablePlugins.filter(p =>
+        p.toLowerCase().includes(pluginSearch.toLowerCase())
+    );
+
     const logs = [
         `[${new Date().toISOString()}] INITIALIZING_NEURAL_LINK...`,
         `[${new Date().toISOString()}] SYNCING_DESIRED_STATE...`,
@@ -100,6 +108,26 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
                     return;
                 }
             }
+
+            // Filter secrets to remove empty strings
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const filteredSecrets = Object.entries(finalConfig.settings?.secrets || {}).reduce((acc: any, [key, value]) => {
+                if (value && typeof value === 'string' && value.trim() !== '') {
+                    acc[key] = value;
+                }
+                return acc;
+            }, {});
+
+            finalConfig = {
+                ...finalConfig,
+                settings: {
+                    ...finalConfig.settings,
+                    secrets: filteredSecrets
+                },
+                // Ensure unique plugins and remove empty strings if any
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                plugins: [...new Set(finalConfig.plugins || [])].filter(Boolean) as any
+            };
 
             await onSave(finalConfig, null, finalConfig.name);
             onClose();
@@ -385,7 +413,30 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
                                                 <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-2 ml-1 transition-colors group-focus-within:text-primary">Model Architecture</label>
                                                 <select
                                                     value={config.modelProvider || 'openai'}
-                                                    onChange={(e) => updateField('modelProvider', e.target.value)}
+                                                    onChange={(e) => {
+                                                        const provider = e.target.value;
+                                                        updateField('modelProvider', provider);
+
+                                                        // Auto-select corresponding plugin
+                                                        const providerMap: Record<string, string> = {
+                                                            'openai': '@elizaos/plugin-openai',
+                                                            'anthropic': '@elizaos/plugin-anthropic',
+                                                            'google': '@elizaos/plugin-google-genai',
+                                                            'llama_local': '@elizaos/plugin-ollama'
+                                                        };
+
+                                                        // Also check for google-genai if google doesn't match
+                                                        const pluginId = providerMap[provider];
+                                                        const inputs = config.plugins || [];
+
+                                                        if (pluginId && !inputs.includes(pluginId)) {
+                                                            // Check if we should add it.
+                                                            // For now, let's just add it if it's not there.
+                                                            // We might want to remove old provider plugins, but users might want multi-provider.
+                                                            // Let's just Add.
+                                                            updateField('plugins', [...inputs, pluginId]);
+                                                        }
+                                                    }}
                                                     className="w-full rounded-[1.25rem] border border-white/10 bg-white/5 px-5 py-4 focus:border-primary/50 outline-none transition-all font-bold group-hover:bg-white/[0.08] appearance-none"
                                                 >
                                                     <option value="openai" className="bg-slate-950 text-white">OpenAI (GPT-4o Omniscience)</option>
@@ -447,29 +498,46 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
                                         </div>
                                         <h3 className="font-black uppercase tracking-widest text-xs">Skills</h3>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {availablePlugins.map(plugin => (
-                                            <div
-                                                key={plugin.id}
-                                                onClick={() => togglePlugin(plugin.id)}
-                                                className={`p-6 rounded-3xl border transition-all cursor-pointer group flex items-start gap-4 ${config.plugins?.includes(plugin.id)
-                                                    ? 'bg-primary/10 border-primary/30'
-                                                    : 'bg-white/5 border-white/5 hover:border-white/10'}`}
-                                            >
-                                                <div className={`size-10 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110 ${config.plugins?.includes(plugin.id) ? 'bg-primary text-white' : 'bg-white/5 text-muted-foreground'}`}>
-                                                    <Zap size={20} />
-                                                </div>
-                                                <div>
-                                                    <h4 className="font-black text-sm uppercase tracking-widest mb-1">{plugin.name}</h4>
-                                                    <p className="text-xs text-muted-foreground">The name of your ElizaOS agent</p>
-                                                    <p className="text-xs text-muted-foreground font-medium leading-relaxed">{plugin.description}</p>
-                                                </div>
-                                                <div className={`size-6 rounded-full border flex items-center justify-center ml-auto ${config.plugins?.includes(plugin.id) ? 'bg-primary border-primary text-white' : 'border-white/10'}`}>
-                                                    {config.plugins?.includes(plugin.id) && <Plus size={14} className="rotate-45" />}
-                                                </div>
-                                            </div>
-                                        ))}
+                                    <div className="relative mb-6">
+                                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/40" size={16} />
+                                        <input
+                                            value={pluginSearch}
+                                            onChange={(e) => setPluginSearch(e.target.value)}
+                                            placeholder="Search neural extensions..."
+                                            className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-sm font-bold focus:border-pink-400/50 outline-none transition-all"
+                                        />
                                     </div>
+
+                                    {isLoadingPlugins ? (
+                                        <div className="flex items-center justify-center p-12">
+                                            <Loader2 className="animate-spin text-pink-400" size={32} />
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {filteredPlugins.map(plugin => (
+                                                <div
+                                                    key={plugin}
+                                                    onClick={() => togglePlugin(plugin)}
+                                                    className={`p-6 rounded-3xl border transition-all cursor-pointer group flex items-center gap-4 ${config.plugins?.includes(plugin)
+                                                        ? 'bg-primary/10 border-primary/30'
+                                                        : 'bg-white/5 border-white/5 hover:border-white/10'}`}
+                                                >
+                                                    <div className={`size-10 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110 ${config.plugins?.includes(plugin) ? 'bg-primary text-white' : 'bg-white/5 text-muted-foreground'}`}>
+                                                        <Zap size={20} />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <h4 className="font-black text-xs uppercase tracking-widest mb-1 truncate" title={plugin}>{plugin}</h4>
+                                                        <p className="text-[10px] text-muted-foreground/60 truncate">
+                                                            {plugin.replace('@elizaos/', '')} module
+                                                        </p>
+                                                    </div>
+                                                    <div className={`size-6 rounded-full border flex items-center justify-center ml-auto shrink-0 ${config.plugins?.includes(plugin) ? 'bg-primary border-primary text-white' : 'border-white/10'}`}>
+                                                        {config.plugins?.includes(plugin) && <Plus size={14} className="rotate-45" />}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             {activeTab === 'secrets' && (
@@ -484,86 +552,136 @@ export default function ElizaOSWizard({ agent, actual, onSave, onClose }: ElizaO
                                         </div>
                                     </div>
                                     <div className="space-y-6">
-                                        {Object.entries(config.settings?.secrets || {}).map(([key, value]) => (
-                                            <div key={key} className="group p-6 rounded-3xl bg-white/5 border border-white/5 hover:border-indigo-500/30 transition-all flex flex-col gap-4">
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">{key}</span>
+                                        <div className="space-y-6">
+                                            {/* Required Secrets Section */}
+                                            {requiredSecrets.length > 0 && (
+                                                <div className="space-y-4 mb-8">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <AlertTriangle size={14} className="text-amber-400" />
+                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-amber-400">Required by Plugins</h4>
+                                                    </div>
+                                                    {requiredSecrets.map((secret) => {
+                                                        const value = config.settings?.secrets?.[secret.name];
+                                                        const hasValue = value && value.length > 0;
+
+                                                        return (
+                                                            <div key={secret.name} className="group p-6 rounded-3xl bg-amber-500/5 border border-amber-500/10 hover:border-amber-500/30 transition-all flex flex-col gap-4">
+                                                                <div className="flex justify-between items-center">
+                                                                    <div>
+                                                                        <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">{secret.name}</span>
+                                                                        <span className="ml-2 text-[10px] text-muted-foreground/60">{secret.plugin.replace('@elizaos/', '')}</span>
+                                                                    </div>
+                                                                    {hasValue && <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1"><Shield size={10} /> Configured</span>}
+                                                                </div>
+                                                                <div>
+                                                                    <input
+                                                                        type="password"
+                                                                        value={value || ''}
+                                                                        onChange={(e) => {
+                                                                            const secrets = { ...config.settings?.secrets, [secret.name]: e.target.value };
+                                                                            updateField('settings', { ...config.settings, secrets });
+                                                                        }}
+                                                                        placeholder={`Enter ${secret.name}`}
+                                                                        className="w-full bg-transparent border-b border-white/5 py-1 font-mono text-sm focus:border-amber-400 outline-none transition-colors placeholder:text-muted-foreground/20"
+                                                                    />
+                                                                    {secret.description && (
+                                                                        <p className="mt-2 text-[10px] text-muted-foreground">{secret.description}</p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <Shield size={14} className="text-indigo-400" />
+                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-400">Custom Secrets</h4>
+                                            </div>
+
+                                            {Object.entries(config.settings?.secrets || {})
+                                                .filter(([key]) => !requiredSecrets.find(s => s.name === key))
+                                                .map(([key, value]) => (
+                                                    <div key={key} className="group p-6 rounded-3xl bg-white/5 border border-white/5 hover:border-indigo-500/30 transition-all flex flex-col gap-4">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400">{key}</span>
+                                                            <button
+                                                                onClick={() => {
+                                                                    const secrets = { ...config.settings?.secrets };
+                                                                    delete secrets[key];
+                                                                    updateField('settings', { ...config.settings, secrets });
+                                                                }}
+                                                                className="text-muted-foreground/40 hover:text-destructive transition-colors"
+                                                            >
+                                                                <Skull size={14} />
+                                                            </button>
+                                                        </div>
+                                                        <input
+                                                            type="password"
+                                                            value={value as string}
+                                                            onChange={(e) => {
+                                                                const secrets = { ...config.settings?.secrets, [key]: e.target.value };
+                                                                updateField('settings', { ...config.settings, secrets });
+                                                            }}
+                                                            className="bg-transparent border-b border-white/5 py-1 font-mono text-sm focus:border-indigo-400 outline-none transition-colors"
+                                                        />
+                                                    </div>
+                                                ))}
+
+                                            {isAddingSecret ? (
+                                                <div className="p-8 rounded-[2.5rem] bg-indigo-500/5 border border-indigo-500/20 animate-in fade-in zoom-in-95 duration-300">
+                                                    <div className="flex justify-between items-center mb-6">
+                                                        <h4 className="text-xs font-black uppercase tracking-widest text-indigo-400">New Secret Matrix</h4>
+                                                        <button onClick={() => setIsAddingSecret(false)} className="text-muted-foreground/40 hover:text-white transition-colors">
+                                                            <X size={16} />
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                                        <div className="space-y-2">
+                                                            <label className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest ml-1">Key</label>
+                                                            <input
+                                                                value={newSecretKey}
+                                                                onChange={(e) => setNewSecretKey(e.target.value)}
+                                                                placeholder="AGENT_KEY..."
+                                                                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3.5 font-bold text-sm focus:border-indigo-500 outline-none transition-all placeholder:text-muted-foreground/20"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <label className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest ml-1">Value</label>
+                                                            <input
+                                                                value={newSecretValue}
+                                                                onChange={(e) => setNewSecretValue(e.target.value)}
+                                                                type="password"
+                                                                placeholder="••••••••"
+                                                                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3.5 font-mono text-sm focus:border-indigo-500 outline-none transition-all placeholder:text-muted-foreground/20"
+                                                            />
+                                                        </div>
+                                                    </div>
                                                     <button
                                                         onClick={() => {
-                                                            const secrets = { ...config.settings?.secrets };
-                                                            delete secrets[key];
+                                                            if (!newSecretKey.trim()) return;
+                                                            const secrets = { ...config.settings?.secrets, [newSecretKey]: newSecretValue };
                                                             updateField('settings', { ...config.settings, secrets });
+                                                            setNewSecretKey('');
+                                                            setNewSecretValue('');
+                                                            setIsAddingSecret(false);
                                                         }}
-                                                        className="text-muted-foreground/40 hover:text-destructive transition-colors"
+                                                        disabled={!newSecretKey.trim()}
+                                                        className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50"
                                                     >
-                                                        <Skull size={14} />
+                                                        Secure Secret
                                                     </button>
                                                 </div>
-                                                <input
-                                                    type="password"
-                                                    value={value as string}
-                                                    onChange={(e) => {
-                                                        const secrets = { ...config.settings?.secrets, [key]: e.target.value };
-                                                        updateField('settings', { ...config.settings, secrets });
-                                                    }}
-                                                    className="bg-transparent border-b border-white/5 py-1 font-mono text-sm focus:border-indigo-400 outline-none transition-colors"
-                                                />
-                                            </div>
-                                        ))}
-
-                                        {isAddingSecret ? (
-                                            <div className="p-8 rounded-[2.5rem] bg-indigo-500/5 border border-indigo-500/20 animate-in fade-in zoom-in-95 duration-300">
-                                                <div className="flex justify-between items-center mb-6">
-                                                    <h4 className="text-xs font-black uppercase tracking-widest text-indigo-400">New Secret Matrix</h4>
-                                                    <button onClick={() => setIsAddingSecret(false)} className="text-muted-foreground/40 hover:text-white transition-colors">
-                                                        <X size={16} />
-                                                    </button>
-                                                </div>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest ml-1">Key</label>
-                                                        <input
-                                                            value={newSecretKey}
-                                                            onChange={(e) => setNewSecretKey(e.target.value)}
-                                                            placeholder="AGENT_KEY..."
-                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3.5 font-bold text-sm focus:border-indigo-500 outline-none transition-all placeholder:text-muted-foreground/20"
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest ml-1">Value</label>
-                                                        <input
-                                                            value={newSecretValue}
-                                                            onChange={(e) => setNewSecretValue(e.target.value)}
-                                                            type="password"
-                                                            placeholder="••••••••"
-                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3.5 font-mono text-sm focus:border-indigo-500 outline-none transition-all placeholder:text-muted-foreground/20"
-                                                        />
-                                                    </div>
-                                                </div>
+                                            ) : (
                                                 <button
-                                                    onClick={() => {
-                                                        if (!newSecretKey.trim()) return;
-                                                        const secrets = { ...config.settings?.secrets, [newSecretKey]: newSecretValue };
-                                                        updateField('settings', { ...config.settings, secrets });
-                                                        setNewSecretKey('');
-                                                        setNewSecretValue('');
-                                                        setIsAddingSecret(false);
-                                                    }}
-                                                    disabled={!newSecretKey.trim()}
-                                                    className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+                                                    onClick={() => setIsAddingSecret(true)}
+                                                    className="w-full py-5 rounded-2xl border border-dashed border-white/10 hover:border-indigo-500/40 hover:bg-indigo-500/5 transition-all flex items-center justify-center gap-2 group"
                                                 >
-                                                    Secure Secret
+                                                    <Plus size={16} className="text-muted-foreground group-hover:text-indigo-400" />
+                                                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground group-hover:text-indigo-400">Add New Secret Entry</span>
                                                 </button>
-                                            </div>
-                                        ) : (
-                                            <button
-                                                onClick={() => setIsAddingSecret(true)}
-                                                className="w-full py-5 rounded-2xl border border-dashed border-white/10 hover:border-indigo-500/40 hover:bg-indigo-500/5 transition-all flex items-center justify-center gap-2 group"
-                                            >
-                                                <Plus size={16} className="text-muted-foreground group-hover:text-indigo-400" />
-                                                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground group-hover:text-indigo-400">Add New Secret Entry</span>
-                                            </button>
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             )}

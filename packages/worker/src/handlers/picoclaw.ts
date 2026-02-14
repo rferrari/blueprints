@@ -118,9 +118,29 @@ export async function stopPicoClawAgent(agentId: string) {
         await container.remove();
         logger.info(`PicoClaw agent ${agentId} stopped and removed.`);
     } catch (err: any) {
-        if (err.statusCode !== 404 && err.status !== 404) {
+        if (err.message.includes('no such container') || err.message.includes('404')) {
             // Ignore 404 (already gone)
             logger.error(`Error stopping PicoClaw agent ${agentId}:`, err);
         }
+    }
+}
+
+export async function runTerminalCommand(agentId: string, command: string): Promise<string> {
+    const containerName = getAgentContainerName(agentId, 'picoclaw');
+
+    try {
+        const exec = await docker.createExec(containerName, {
+            AttachStdout: true,
+            AttachStderr: true,
+            Tty: true,
+            WorkingDir: '/root/.picoclaw',
+            Cmd: ['sh', '-c', command]
+        });
+
+        const result = await docker.startExec(exec.Id, { Detach: false, Tty: true });
+        return typeof result === 'string' ? result : JSON.stringify(result);
+    } catch (err: any) {
+        logger.error(`PicoClaw terminal error for ${agentId}:`, err.message);
+        return `Error: ${err.message}`;
     }
 }

@@ -3,7 +3,7 @@ import { supabase } from './lib/supabase';
 import { logger } from './lib/logger';
 import { cryptoUtils } from '@eliza-manager/shared/crypto';
 import { runTerminalCommand as runOpenClawTerminal } from './handlers/openclaw';
-import { runElizaCommand } from './handlers/eliza';
+import { getHandler } from './handlers';
 
 const isDocker = fs.existsSync('/.dockerenv');
 
@@ -54,10 +54,11 @@ Examples:
 
             let output = '';
 
-            if (agent.framework === 'eliza') {
-                output = await runElizaCommand(agent_id, command);
+            const handler = getHandler(agent.framework);
+            if (handler?.runCommand) {
+                output = await handler.runCommand(agent_id, command);
             } else {
-                output = await runOpenClawTerminal(agent_id, command);
+                throw new Error(`Framework ${agent.framework} does not support terminal commands`);
             }
 
             await supabase.from('agent_conversations').insert([{

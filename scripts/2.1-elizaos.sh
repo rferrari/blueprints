@@ -33,9 +33,13 @@ cp "./scripts/elizaos.entrypoint.sh" "$TARGET_DIR/entrypoint.sh"
 cd "$TARGET_DIR"
 docker build -t elizaos:local .
 
-# Extract version from the built image
+# Extract version from the Source (avoiding docker run hang)
 echo "🔍 Extracting ElizaOS version..."
-ELIZA_VERSION=$(docker run --rm elizaos:local elizaos --version | tr -d '\r' | head -n 1)
+if [ -f "$TARGET_DIR/packages/cli/package.json" ]; then
+    ELIZA_VERSION=$(grep '"version":' "$TARGET_DIR/packages/cli/package.json" | head -n 1 | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+else
+    ELIZA_VERSION="unknown"
+fi
 echo "Found version: $ELIZA_VERSION"
 
 # 4. Sync with database

@@ -3,24 +3,40 @@
 import React, { useState } from 'react';
 import { Save, X, Cpu, Globe, Database, Code, Shield } from 'lucide-react';
 
+type AgentConfig = {
+    model: string;
+    providers: Record<string, unknown>;
+    tools: Record<string, unknown>;
+    [key: string]: unknown;
+};
+
 interface PicoClawWizardProps {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    agent: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    actual: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onSave: (config: any, metadata?: any, name?: string) => Promise<void>;
+    agent: {
+        id: string;
+        name?: string;
+        agent_desired_state?: {
+            config?: AgentConfig;
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        [key: string]: any;
+    };
+    actual?: {
+        status?: string;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        [key: string]: any;
+    };
+    onSave: (config: AgentConfig, metadata?: unknown, name?: string) => Promise<void>;
     onClose: () => void;
 }
 
 export default function PicoClawWizard({ agent, actual, onSave, onClose }: PicoClawWizardProps) {
-    const existingConfig = agent.agent_desired_state?.config || {
+    const existingConfig: AgentConfig = agent.agent_desired_state?.config || {
         model: "openrouter/auto",
         providers: {},
         tools: {}
     };
 
-    const [config, setConfig] = useState(existingConfig);
+    const [config, setConfig] = useState<AgentConfig>(existingConfig);
     const [name, setName] = useState(agent.name || "PicoClaw Agent");
     const [saving, setSaving] = useState(false);
     const [activeTab, setActiveTab] = useState<'general' | 'providers' | 'json'>('general');
@@ -38,9 +54,8 @@ export default function PicoClawWizard({ agent, actual, onSave, onClose }: PicoC
         }
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateConfig = (key: string, value: any) => {
-        setConfig((prev: any) => ({ ...prev, [key]: value }));
+    const updateConfig = <K extends keyof AgentConfig>(key: K, value: AgentConfig[K]) => {
+        setConfig(prev => ({ ...prev, [key]: value }));
     };
 
     return (

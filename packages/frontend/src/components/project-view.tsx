@@ -577,9 +577,11 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                     />
                 ) : editingAgent.framework === 'picoclaw' ? (
                     <PicoClawWizard
-                        agent={editingAgent}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        agent={editingAgent as any}
                         actual={(Array.isArray(editingAgent.agent_actual_state) ? editingAgent.agent_actual_state[0] : editingAgent.agent_actual_state) || { status: 'stopped' }}
-                        onSave={saveAgentConfig}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        onSave={saveAgentConfig as any}
                         onClose={() => setEditingAgent(null)}
                     />
                 ) : (

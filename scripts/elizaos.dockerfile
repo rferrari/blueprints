@@ -13,7 +13,7 @@ WORKDIR /app
 # - python3: Often required for building native Node.js addons (like sqlite or crypto).
 # We clean up the cache (rm -rf) after install to keep the final image size small.
 RUN apt-get update && \
-  apt-get install -y curl ffmpeg git python3 && \
+  apt-get install -y curl ffmpeg git python3 procps && \
   rm -rf /var/lib/apt/lists/*
 
 # 4. Bun Manager: Install 'Bun' globally using npm.

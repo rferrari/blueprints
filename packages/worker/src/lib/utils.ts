@@ -3,7 +3,10 @@ import crypto from 'node:crypto';
 /**
  * Generates a consistent container name for an agent.
  */
-export function getAgentContainerName(agentId: string, framework: string = 'agent'): string {
+export function getAgentContainerName(agentId: string, framework: string = 'agent', projectId?: string): string {
+    if (framework === 'elizaos' && projectId) {
+        return `elizaos-${projectId}`;
+    }
     return `${framework}-${agentId}`;
 }
 

@@ -67,7 +67,7 @@ export async function reconcile() {
             let isRunning = status === 'running';
 
             // Verify Docker state
-            const containerName = getAgentContainerName(agent.id, agent.framework);
+            const containerName = getAgentContainerName(agent.id, agent.framework, agent.project_id);
             const containerIsReallyRunning = runningContainers.has(containerName);
 
             if (isRunning && !containerIsReallyRunning) {
@@ -86,7 +86,7 @@ export async function reconcile() {
                 logger.info(`[TERMINATE] Executing final deletion for agent ${agent.id}...`);
                 try {
                     const handler = getHandler(agent.framework);
-                    await handler.stop(agent.id);
+                    await handler.stop(agent.id, agent.project_id);
                     // ONLY delete from DB if cleanup succeeded
                     await supabase.from('agents').delete().eq('id', agent.id);
                     logger.info(`[TERMINATE] Agent ${agent.id} successfully purged from both Docker and DB.`);
@@ -124,7 +124,7 @@ export async function reconcile() {
                         }
 
                         // Unified start call
-                        await handler.start(agent.id, desired.config, desired.metadata, forceDoctor);
+                        await handler.start(agent.id, desired.config, desired.metadata, forceDoctor, agent.project_id);
 
                         // Update config hash
                         configHashes.set(agent.id, currentHash);
@@ -158,7 +158,7 @@ export async function reconcile() {
                 if (isRunning) {
                     try {
                         const handler = getHandler(agent.framework);
-                        await handler.stop(agent.id);
+                        await handler.stop(agent.id, agent.project_id);
                         configHashes.delete(agent.id);
                         failCounts.delete(agent.id);
                     } catch (err: any) {
@@ -189,27 +189,46 @@ async function cleanupOrphanContainers() {
 
         for (const container of containers) {
             const name = container.Names[0].replace('/', '');
-            // Pattern: [framework]-[agent_id]
-            const match = name.match(/^([a-z0-9]+)-([a-f0-9-]{36})$/);
-            if (match) {
-                const agentId = match[2];
-                if (!activeAgentIds.has(agentId)) {
-                    logger.warn(`[CLEANUP] Found orphan container ${name} (Agent ${agentId} missing from DB). Removing...`);
-                    try {
-                        const c = await docker.getContainer(container.Id);
-                        if (container.State === 'running') {
-                            await c.stop();
-                        }
-                        await c.remove();
-                        logger.info(`[CLEANUP] Successfully removed orphan container ${name}`);
-                    } catch (err: any) {
-                        logger.error(`[CLEANUP] Failed to remove ${name}:`, err.message);
+            // Pattern 1: [framework]-[agent_id] (legacy or other frameworks)
+            // Pattern 2: elizaos-[project_id] (scoped elizaos)
+            const agentMatch = name.match(/^([a-z0-9]+)-([a-f0-9-]{36})$/);
+
+            if (agentMatch) {
+                const framework = agentMatch[1];
+                const id = agentMatch[2];
+
+                if (framework === 'elizaos') {
+                    // This is elizaos-[project_id]
+                    const { data: projectAgents } = await supabase.from('agents').select('id').eq('project_id', id).eq('framework', 'elizaos');
+                    if (!projectAgents || projectAgents.length === 0) {
+                        logger.warn(`[CLEANUP] Found orphan ElizaOS project container ${name}. Removing...`);
+                        await removeContainer(container.Id, name);
+                    }
+                } else {
+                    // Regular [framework]-[agent_id]
+                    if (!activeAgentIds.has(id)) {
+                        logger.warn(`[CLEANUP] Found orphan container ${name} (Agent ${id} missing from DB). Removing...`);
+                        await removeContainer(container.Id, name);
                     }
                 }
             }
         }
     } catch (err: any) {
         logger.error('Cleanup Loop Error:', err.message);
+    }
+}
+
+async function removeContainer(id: string, name: string) {
+    try {
+        const c = await docker.getContainer(id);
+        const info = await c.inspect();
+        if (info.State.Status === 'running') {
+            await c.stop();
+        }
+        await c.remove();
+        logger.info(`[CLEANUP] Successfully removed orphan container ${name}`);
+    } catch (err: any) {
+        logger.error(`[CLEANUP] Failed to remove ${name}:`, err.message);
     }
 }
 

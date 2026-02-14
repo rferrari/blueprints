@@ -179,7 +179,22 @@ async function doStartElizaOS(agentId: string, config: any, projectId?: string) 
             AttachStderr: true
         });
         const output = await docker.startExec(execInfo.Id, { Detach: false });
-        detectedVersion = output.trim().replace(/[^\x20-\x7E\n]/g, '');
+        if (typeof output === 'string') {
+            // Strip ANSI escape codes
+            const cleanOutput = output.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').trim();
+            const lines = cleanOutput.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length > 0) {
+                // The version is typically the last line: "0.0.0"
+                const lastLine = lines[lines.length - 1];
+                if (/^\d+\.\d+\.\d+/.test(lastLine)) {
+                    detectedVersion = lastLine;
+                } else {
+                    // Fallback to searching for first version-like string in the whole output
+                    const match = cleanOutput.match(/(\d+\.\d+\.\d+)/);
+                    if (match) detectedVersion = match[1];
+                }
+            }
+        }
     } catch { }
 
     await supabase.from('agent_actual_state').upsert({

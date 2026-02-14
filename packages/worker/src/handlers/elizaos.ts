@@ -7,17 +7,18 @@ import { getAgentContainerName, renameKey } from '../lib/utils';
 import { DOCKER_NETWORK_NAME, ELIZAOS_IMAGE_BASE } from '../lib/constants';
 import { cryptoUtils } from '@eliza-manager/shared/crypto';
 
-function getAgentContainerPath(agentId: string) {
-    const root = process.env.AGENTS_DATA_CONTAINER_PATH;
-    if (!root) throw new Error('AGENTS_DATA_CONTAINER_PATH not set');
+function resolvePath(envPath: string | undefined, fallback: string): string {
+    const p = envPath || fallback;
+    return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
+}
 
+function getAgentContainerPath(agentId: string) {
+    const root = resolvePath(process.env.AGENTS_DATA_CONTAINER_PATH, './workspaces');
     return path.join(root, agentId);
 }
 
 function getAgentHostPath(agentId: string) {
-    const root = process.env.AGENTS_DATA_HOST_PATH;
-    if (!root) throw new Error('AGENTS_DATA_HOST_PATH not set');
-
+    const root = resolvePath(process.env.AGENTS_DATA_HOST_PATH, './workspaces');
     return path.join(root, agentId);
 }
 

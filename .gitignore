@@ -32,7 +32,7 @@ dist-ssr
 .turbo/
 
 packages/worker/workspaces/*
-external/*
+#external/*
 workspaces/
 *.tsbuildinfo
 .agent/skills/ssh-server.md

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Bot, Plus, Skull, Play, Square, User, AlertCircle, Loader2, Activity, Cpu, Database, MessageSquare, Terminal } from 'lucide-react';
 import { useAuth } from '@/components/auth-provider';
 import { useNotification } from '@/components/notification-provider';
-import { Project, Agent, AgentDesiredState, AgentActualState } from '@eliza-manager/shared';
+import { Project, Agent, AgentDesiredState, AgentActualState, generateClusterName } from '@eliza-manager/shared';
 
 interface AgentWithStates extends Agent {
     agent_desired_state: AgentDesiredState | AgentDesiredState[];
@@ -31,59 +31,7 @@ interface LocalAgentState {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-const COOL_NAMES = [
-    // Original
-    'Neon Ghost', 'Cypher Stalker', 'Glitch Weaver', 'Midnight Oracle',
-    'Quantum Spark', 'Aether Pulse', 'Void Runner', 'Binary Spirit',
-    'Silicon Reaper', 'Echo Prime', 'Nexus Core', 'Zenith Auditor',
-    'Solar Flare', 'Lunar Shadow', 'Onyx Sentinel', 'Cobalt Phantom',
 
-    // Added Cyber / AI
-    'Chrome Warden', 'Pixel Seer', 'Neural Drift', 'Circuit Prophet',
-    'Data Specter', 'Plasma Knight', 'Kernel Watcher', 'Hash Nomad',
-    'Crypto Raven', 'Logic Hunter',
-
-    // Mystic / Cosmic
-    'Astral Monk', 'Obsidian Mage', 'Star Architect', 'Cosmic Whisper',
-    'Gravity Oracle', 'Nova Priest', 'Entropy Sage', 'Void Alchemist',
-
-    // Hacker / Rogue
-    'Root Walker', 'Stack Pirate', 'Zero Day', 'Packet Rogue',
-    'Daemon Rider', 'Shell Phantom', 'Dark Terminal',
-
-    // Fun Dark Tech
-    'Rust Angel', 'Glass Titan', 'Wire Witch', 'Cloud Ronin',
-    'Bit Samurai', 'Cache Vampire'
-];
-
-const COOL_WORDS = [...new Set(
-    COOL_NAMES.flatMap(n => n.split(' '))
-)];
-
-const generateCoolName = () => {
-    const a = Math.floor(Math.random() * COOL_WORDS.length);
-    let b = Math.floor(Math.random() * COOL_WORDS.length);
-    while (b === a) b = Math.floor(Math.random() * COOL_WORDS.length);
-    return `${COOL_WORDS[a]} ${COOL_WORDS[b]}`;
-};
-
-// const generateCoolName = () => {
-//     // Split all names into individual words
-//     const words = COOL_NAMES.flatMap(name => name.split(' '));
-//     // Remove duplicates just in case
-//     const uniqueWords = [...new Set(words)];
-
-//     // Pick 2 random words
-//     const r1 = Math.floor(Math.random() * uniqueWords.length);
-//     let r2 = Math.floor(Math.random() * uniqueWords.length);
-
-//     // Ensure we don't pick the same word twice
-//     while (r2 === r1) {
-//         r2 = Math.floor(Math.random() * uniqueWords.length);
-//     }
-
-//     return `${uniqueWords[r1]} ${uniqueWords[r2]}`;
-// };
 
 export default function ProjectView({ projectId, onDataChange, onUpgrade }: { projectId: string; onDataChange?: () => void; onUpgrade?: () => void }) {
     const { session } = useAuth();
@@ -653,7 +601,7 @@ export default function ProjectView({ projectId, onDataChange, onUpgrade }: { pr
                                 e.preventDefault();
                                 e.stopPropagation();
                                 if (!isAtLimit) {
-                                    const randomName = generateCoolName();
+                                    const randomName = generateClusterName();
                                     setNewAgentName(randomName);
                                     setIsAdding(true);
                                 } else {

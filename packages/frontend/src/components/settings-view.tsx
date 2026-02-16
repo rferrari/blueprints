@@ -219,7 +219,7 @@ export default function SettingsView({ user }: SettingsViewProps) {
 
 
             {/* MCP API Keys */}
-            <ApiKeyManager />
+            <ApiKeyManager tier={tier} onUpgrade={() => setIsUpgradeModalOpen(true)} />
 
             {/* Upgrade Modal */}
             <UpgradeModal

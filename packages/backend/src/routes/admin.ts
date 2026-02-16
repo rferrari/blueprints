@@ -373,6 +373,32 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
         if (error) throw error;
         return { success: true, agent_id: data.value.agent_id };
     });
+
+    // 5. MCP System Toggle
+    fastify.get('/system/mcp', async () => {
+        const { data, error } = await fastify.supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'mcp_enabled')
+            .single();
+
+        if (error && error.code !== 'PGRST116') throw error;
+        return { enabled: data?.value === true };
+    });
+
+    fastify.post<{ Body: { enabled: boolean } }>('/system/mcp', async (request) => {
+        const { enabled } = request.body;
+        const { error } = await fastify.supabase
+            .from('system_settings')
+            .upsert({
+                key: 'mcp_enabled',
+                value: enabled,
+                updated_at: new Date().toISOString()
+            });
+
+        if (error) throw error;
+        return { success: true, enabled };
+    });
 };
 
 export default adminRoutes;

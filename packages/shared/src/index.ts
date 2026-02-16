@@ -42,6 +42,42 @@ export const OPENAI_ALLOWED_MODELS = new Set([
     "o1-pro"
 ]);
 
+const COOL_NAMES = [
+    // Original
+    'Neon Ghost', 'Cypher Stalker', 'Glitch Weaver', 'Midnight Oracle',
+    'Quantum Spark', 'Aether Pulse', 'Void Runner', 'Binary Spirit',
+    'Silicon Reaper', 'Echo Prime', 'Nexus Core', 'Zenith Auditor',
+    'Solar Flare', 'Lunar Shadow', 'Onyx Sentinel', 'Cobalt Phantom',
+
+    // Added Cyber / AI
+    'Chrome Warden', 'Pixel Seer', 'Neural Drift', 'Circuit Prophet',
+    'Data Specter', 'Plasma Knight', 'Kernel Watcher', 'Hash Nomad',
+    'Crypto Raven', 'Logic Hunter',
+
+    // Mystic / Cosmic
+    'Astral Monk', 'Obsidian Mage', 'Star Architect', 'Cosmic Whisper',
+    'Gravity Oracle', 'Nova Priest', 'Entropy Sage', 'Void Alchemist',
+
+    // Hacker / Rogue
+    'Root Walker', 'Stack Pirate', 'Zero Day', 'Packet Rogue',
+    'Daemon Rider', 'Shell Phantom', 'Dark Terminal',
+
+    // Fun Dark Tech
+    'Rust Angel', 'Glass Titan', 'Wire Witch', 'Cloud Ronin',
+    'Bit Samurai', 'Cache Vampire'
+];
+
+export const COOL_WORDS = [...new Set(
+    COOL_NAMES.flatMap(n => n.split(' '))
+)];
+
+export function generateClusterName() {
+    const a = Math.floor(Math.random() * COOL_WORDS.length);
+    let b = Math.floor(Math.random() * COOL_WORDS.length);
+    while (b === a) b = Math.floor(Math.random() * COOL_WORDS.length);
+    return `${COOL_WORDS[a]} ${COOL_WORDS[b]}`;
+}
+
 // --- Tier & Security Architecture ---
 
 export enum UserTier {

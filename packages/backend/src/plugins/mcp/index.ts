@@ -1,23 +1,39 @@
-import { FastifyPluginAsync } from 'fastify';
+import { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod'; // Zod is required for tool schemas
 import { cryptoUtils } from '@eliza-manager/shared/crypto';
 import { McpAuditService } from './audit.js';
+import crypto from 'node:crypto';
 
 declare module 'fastify' {
     interface FastifyRequest {
         mcpKey: { id: string; scopes: string[] };
-        mcpUser: { id: string };
+        mcpUser: { id: string; tier: string };
     }
 }
+
+import { generateClusterName } from '@eliza-manager/shared';
 
 const mcpPlugin: FastifyPluginAsync = async (fastify) => {
     const auditService = new McpAuditService(fastify);
 
     // Map of session tokens to transports
-    const transports = new Map<string, SSEServerTransport>();
+    const transports = new Map<string, StreamableHTTPServerTransport>();
+
+    // 0. Disable body parsing for MCP messages to allow SDK to handle stream
+    fastify.addHook('preParsing', async (request, reply, payload) => {
+        if (request.url.startsWith('/mcp/messages')) {
+            request.headers['content-type'] = 'application/x-mcp-json';
+        }
+        return payload;
+    });
+
+    fastify.addContentTypeParser('application/x-mcp-json', (request, payload, done) => {
+        // Just pass through the raw stream
+        done(null, payload);
+    });
 
     // Middleware guard
     fastify.addHook('preHandler', async (request, reply) => {
@@ -33,12 +49,7 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
             throw fastify.httpErrors.serviceUnavailable('MCP is currently disabled');
         }
 
-        // 2. Authentication (Only for SSE init and Messages)
-        // For /messages, we might rely on the sessionId to map to a pre-authenticated transport?
-        // Actually, standardized MCP over SSE usually requires the POST to also be authenticated
-        // or effectively authenticated via the sessionId.
-        // Let's enforce API Key on ALL endpoints for simplicity and security.
-
+        // 2. Authentication
         const authHeader = request.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer bp_sk_')) {
             throw fastify.httpErrors.unauthorized('Missing or invalid MCP API Key');
@@ -59,63 +70,52 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
         }
 
         // 3. Attach Context
+        const { data: profile } = await fastify.supabase
+            .from('profiles')
+            .select('tier')
+            .eq('id', verified.userId)
+            .single();
+
         request.mcpKey = { id: verified.keyId, scopes: verified.scopes };
-        request.mcpUser = { id: verified.userId };
+        request.mcpUser = { id: verified.userId, tier: profile?.tier || 'free' };
     });
 
-    // --- Routes ---
-
-    // SSE Endpoint - ESTABLISH CONNECTION
-    fastify.get('/mcp/sse', async (request, reply) => {
+    // --- Helper for Per-Session Server Setup ---
+    const setupMcpServer = (request: FastifyRequest, transport: StreamableHTTPServerTransport) => {
         const userId = request.mcpUser.id;
+        const userTier = request.mcpUser.tier;
         const keyId = request.mcpKey.id;
         const scopes = request.mcpKey.scopes || [];
 
-        // Create a new transport
-        const transport = new SSEServerTransport('/mcp/messages', reply.raw);
-
-        // Manual session ID handling if needed, but we can assume transport exposes it or we generate one.
-        // SDK's SSEServerTransport generates a UUID sessionId. 
-        // We need to capture it to map it.
-        // It's usually available as transport.sessionId after construction (in some versions) or we have to check.
-        // Let's assume we can access it or we wrapper it.
-        // Inspecting source: SSEServerTransport has `sessionId` property.
-
-        const sessionId = (transport as any).sessionId;
-        transports.set(sessionId, transport);
-
-        // --- Create Per-Connection Server ---
         const server = new McpServer({
             name: 'Blueprints MCP',
             version: '1.0.0'
         });
 
-        // --- Helper for Scopes ---
+        const checkAccess = (toolName: string) => {
+            if (userTier === 'free' && !['account_register', 'pay_upgrade'].includes(toolName)) {
+                throw new Error('Upgrade Required: Programmable MCP access is a Pro feature. Please visit https://blueprints-backend.onrender.com/upgrade to unlock high-scale automation.');
+            }
+        };
+
         const checkScope = (required: string) => {
-            if (!scopes.includes(required) && !scopes.includes('admin')) { // simplistic admin check
+            if (!scopes.includes(required) && !scopes.includes('admin')) {
                 throw new Error(`Missing required scope: ${required}`);
             }
         };
 
-        // --- Register Tools (Closure captures userId) ---
+        // --- Register Tools ---
 
         // 1. LIST AGENTS
         server.tool(
             'list_agents',
             'List all agents belonging to the user',
-            {}, // No args
+            {},
             async () => {
-                // checkScope('agents:read');
+                checkAccess('list_agents');
+                checkScope('read');
                 await auditService.log({ mcpKeyId: keyId, userId, toolName: 'list_agents', status: 'success' });
 
-                const { data, error } = await fastify.supabase
-                    .from('agents')
-                    .select('id, name, framework, created_at, agent_actual_state(status)')
-                    .eq('project_id', (await fastify.supabase.from('projects').select('id').eq('user_id', userId)).data?.map(p => p.id)) // This query is wrong, Supabase doesn't support subquery in .eq like that directly usually with JS client? 
-                // Better to just query projects first or join.
-                // Let's use logic similar to agents.ts
-
-                // Fix: Get project IDs first
                 const { data: projects } = await fastify.supabase.from('projects').select('id').eq('user_id', userId);
                 if (!projects?.length) return { content: [{ type: 'text', text: JSON.stringify([]) }] };
 
@@ -137,8 +137,8 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
             'Start a specific agent',
             { agent_id: z.string().uuid() },
             async ({ agent_id }) => {
-                // checkScope('agents:write');
-                // 1. Verify Ownership
+                checkAccess('start_agent');
+                checkScope('execute');
                 const { data: agent } = await fastify.supabase
                     .from('agents')
                     .select('project_id')
@@ -146,26 +146,16 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
                     .single();
 
                 if (!agent) throw new Error('Agent not found');
-
-                const { data: project } = await fastify.supabase
-                    .from('projects')
-                    .select('user_id')
-                    .eq('id', agent.project_id)
-                    .single();
-
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
                 if (project?.user_id !== userId) throw new Error('Unauthorized');
 
-                // 2. Update Desired State (Worker Authoritative will pick this up)
                 await fastify.supabase
                     .from('agent_desired_state')
                     .update({ enabled: true, updated_at: new Date().toISOString() })
                     .eq('agent_id', agent_id);
 
                 await auditService.log({ mcpKeyId: keyId, userId, toolName: 'start_agent', agentId: agent_id, status: 'success' });
-
-                return {
-                    content: [{ type: 'text', text: `Start command queued for agent ${agent_id}` }]
-                };
+                return { content: [{ type: 'text', text: `Start command queued for agent ${agent_id}` }] };
             }
         );
 
@@ -175,8 +165,8 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
             'Stop a specific agent',
             { agent_id: z.string().uuid() },
             async ({ agent_id }) => {
-                // checkScope('agents:write');
-                // 1. Verify Ownership
+                checkAccess('stop_agent');
+                checkScope('execute');
                 const { data: agent } = await fastify.supabase
                     .from('agents')
                     .select('project_id')
@@ -184,263 +174,93 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
                     .single();
 
                 if (!agent) throw new Error('Agent not found');
-
-                const { data: project } = await fastify.supabase
-                    .from('projects')
-                    .select('user_id')
-                    .eq('id', agent.project_id)
-                    .single();
-
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
                 if (project?.user_id !== userId) throw new Error('Unauthorized');
 
-                // 2. Update Desired State
                 await fastify.supabase
                     .from('agent_desired_state')
                     .update({ enabled: false, updated_at: new Date().toISOString() })
                     .eq('agent_id', agent_id);
 
                 await auditService.log({ mcpKeyId: keyId, userId, toolName: 'stop_agent', agentId: agent_id, status: 'success' });
-
-                return {
-                    content: [{ type: 'text', text: `Stop command queued for agent ${agent_id}` }]
-                };
+                return { content: [{ type: 'text', text: `Stop command queued for agent ${agent_id}` }] };
             }
         );
 
-        // --- NEW TOOLS REQUESTED ---
-
-        // 6. CREATE AGENT
+        // 4. CREATE AGENT
         server.tool(
             'create_agent',
             'Create a new agent in a project',
             {
-                project_id: z.string().uuid(),
+                project_id: z.string().uuid().optional(),
                 name: z.string().min(1),
                 framework: z.enum(['eliza', 'openclaw']).default('openclaw'),
                 config: z.record(z.string(), z.any()).optional()
             },
             async ({ project_id, name, framework, config }) => {
-                // 1. Verify Project Ownership
+                checkAccess('create_agent');
+                checkScope('write');
+                let targetProjectId = project_id;
+
+                if (!targetProjectId) {
+                    const { data: projects } = await fastify.supabase
+                        .from('projects')
+                        .select('id')
+                        .eq('user_id', userId)
+                        .limit(1);
+
+                    if (projects && projects.length > 0) {
+                        targetProjectId = projects[0].id;
+                    } else {
+                        const clusterName = generateClusterName();
+                        const { data: newProject, error: pErr } = await fastify.supabase
+                            .from('projects')
+                            .insert({ name: clusterName, user_id: userId })
+                            .select('id')
+                            .single();
+
+                        if (pErr) throw pErr;
+                        targetProjectId = newProject.id;
+                    }
+                }
+
                 const { data: project } = await fastify.supabase
                     .from('projects')
                     .select('user_id')
-                    .eq('id', project_id)
+                    .eq('id', targetProjectId)
                     .single();
 
                 if (!project || project.user_id !== userId) throw new Error('Unauthorized or project not found');
 
-                // 2. Create Agent
                 const { data: agent, error: aErr } = await fastify.supabase
                     .from('agents')
-                    .insert({ project_id, name, framework })
+                    .insert({ project_id: targetProjectId, name, framework })
                     .select('id')
                     .single();
 
                 if (aErr) throw aErr;
 
-                // 3. Create Desired State
                 const encryptedConfig = config ? cryptoUtils.encryptConfig(config) : {};
                 await fastify.supabase
                     .from('agent_desired_state')
                     .insert({ agent_id: agent.id, config: encryptedConfig, enabled: false });
 
                 await auditService.log({ mcpKeyId: keyId, userId, toolName: 'create_agent', agentId: agent.id, status: 'success' });
-
-                return {
-                    content: [{ type: 'text', text: `Agent '${name}' created with ID: ${agent.id}` }]
-                };
+                return { content: [{ type: 'text', text: `Agent '${name}' created in project '${targetProjectId}' with ID: ${agent.id}` }] };
             }
         );
 
-        // 7. EDIT AGENT CONFIG
+        // 5. AGENT STATUS
         server.tool(
-            'edit_agent_config',
-            'Update an agent\'s configuration',
-            {
-                agent_id: z.string().uuid(),
-                config: z.record(z.string(), z.any())
-            },
-            async ({ agent_id, config }) => {
-                // 1. Verify Ownership
-                const { data: agent } = await fastify.supabase
-                    .from('agents')
-                    .select('project_id')
-                    .eq('id', agent_id)
-                    .single();
-
-                if (!agent) throw new Error('Agent not found');
-                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
-                if (project?.user_id !== userId) throw new Error('Unauthorized');
-
-                // 2. Update Config
-                const encryptedConfig = cryptoUtils.encryptConfig(config);
-                await fastify.supabase
-                    .from('agent_desired_state')
-                    .update({ config: encryptedConfig, updated_at: new Date().toISOString() })
-                    .eq('agent_id', agent_id);
-
-                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'edit_agent_config', agentId: agent_id, status: 'success' });
-
-                return {
-                    content: [{ type: 'text', text: `Configuration updated for agent ${agent_id}` }]
-                };
-            }
-        );
-
-        // 8. REMOVE AGENT
-        server.tool(
-            'remove_agent',
-            'Delete an agent permanently',
+            'agent_status',
+            'Get detailed status and health information for an agent',
             { agent_id: z.string().uuid() },
             async ({ agent_id }) => {
-                // 1. Verify Ownership
+                checkAccess('agent_status');
+                checkScope('read');
                 const { data: agent } = await fastify.supabase
                     .from('agents')
-                    .select('project_id')
-                    .eq('id', agent_id)
-                    .single();
-
-                if (!agent) throw new Error('Agent not found');
-                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
-                if (project?.user_id !== userId) throw new Error('Unauthorized');
-
-                // 2. Delete
-                await fastify.supabase.from('agents').delete().eq('id', agent_id);
-
-                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'remove_agent', agentId: agent_id, status: 'success' });
-
-                return {
-                    content: [{ type: 'text', text: `Agent ${agent_id} removed permanently.` }]
-                };
-            }
-        );
-
-        // 9. SEND MESSAGE
-        server.tool(
-            'send_message',
-            'Send a message to an agent\'s conversation log',
-            {
-                agent_id: z.string().uuid(),
-                content: z.string().min(1)
-            },
-            async ({ agent_id, content }) => {
-                // 1. Verify Ownership
-                const { data: agent } = await fastify.supabase
-                    .from('agents')
-                    .select('project_id')
-                    .eq('id', agent_id)
-                    .single();
-
-                if (!agent) throw new Error('Agent not found');
-                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
-                if (project?.user_id !== userId) throw new Error('Unauthorized');
-
-                // 2. Insert Message
-                await fastify.supabase
-                    .from('agent_conversations')
-                    .insert({
-                        agent_id,
-                        user_id: userId,
-                        content,
-                        sender: 'user'
-                    });
-
-                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'send_message', agentId: agent_id, status: 'success' });
-
-                return {
-                    content: [{ type: 'text', text: `Message delivered to agent ${agent_id}` }]
-                };
-            }
-        );
-
-        // 10. ACCOUNT & BILLING (PLACEHOLDERS)
-        server.tool(
-            'account_register',
-            'Register for a new account (Placeholder)',
-            { email: z.string() },
-            async () => {
-                return { content: [{ type: 'text', text: 'Account registration is currently handled via the web dashboard at https://blueprints.ai/signup' }] };
-            }
-        );
-
-        server.tool(
-            'pay_upgrade',
-            'Upgrade account tier (Placeholder)',
-            { tier: z.enum(['pro', 'enterprise']) },
-            async ({ tier }) => {
-                return { content: [{ type: 'text', text: `Upgrading to ${tier.toUpperCase()} is handled via the dashboard billing section. Please visit https://blueprints.ai/upgrade` }] };
-            }
-        );
-
-
-        // --- RESOURCES ---
-
-        // 4. AGENT CONFIG RESOURCE
-        server.resource(
-            'agent_config',
-            new ResourceTemplate('agent://{agent_id}/config', { list: undefined }),
-            async (uri, { agent_id }) => {
-                // Check Scope? 
-                // Resources are read-only usually, so 'agents:read' is appropriate.
-                // checkScope('agents:read'); 
-
-                // Verify Owner
-                if (typeof agent_id !== 'string') throw new Error('Invalid agent_id');
-
-                const { data: agent } = await fastify.supabase
-                    .from('agents')
-                    .select('project_id')
-                    .eq('id', agent_id)
-                    .single();
-
-                if (!agent) throw new Error('Agent not found');
-
-                const { data: project } = await fastify.supabase
-                    .from('projects')
-                    .select('user_id')
-                    .eq('id', agent.project_id)
-                    .single();
-
-                if (project?.user_id !== userId) throw new Error('Unauthorized');
-
-                // Return Config
-                const { data: desired } = await fastify.supabase
-                    .from('agent_desired_state')
-                    .select('config')
-                    .eq('agent_id', agent_id)
-                    .single();
-
-                let config = {};
-                if (desired?.config) {
-                    try {
-                        config = cryptoUtils.decryptConfig(desired.config);
-                    } catch (e) {
-                        config = { error: 'Failed to decrypt' };
-                    }
-                }
-
-                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'resource:config', agentId: agent_id, status: 'success' });
-
-                return {
-                    contents: [{
-                        uri: uri.href,
-                        text: JSON.stringify(config, null, 2)
-                    }]
-                };
-            }
-        );
-
-        // 5. AGENT STATE RESOURCE
-        server.resource(
-            'agent_state',
-            new ResourceTemplate('agent://{agent_id}/state', { list: undefined }),
-            async (uri, { agent_id }) => {
-                if (typeof agent_id !== 'string') throw new Error('Invalid agent_id');
-
-                // Verify ownership (could cache or optimize this logic helper)
-                const { data: agent } = await fastify.supabase
-                    .from('agents')
-                    .select('project_id')
+                    .select('project_id, name')
                     .eq('id', agent_id)
                     .single();
 
@@ -454,18 +274,205 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
                     .eq('agent_id', agent_id)
                     .single();
 
-                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'resource:state', agentId: agent_id, status: 'success' });
-
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'agent_status', agentId: agent_id, status: 'success' });
                 return {
-                    contents: [{
-                        uri: uri.href,
-                        text: JSON.stringify(actual, null, 2)
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({
+                            name: agent.name,
+                            id: agent_id,
+                            status: actual?.status || 'unknown',
+                            last_sync: actual?.last_sync,
+                            stats: actual?.stats,
+                            error_message: actual?.error_message
+                        }, null, 2)
                     }]
-                }
+                };
             }
         );
 
-        // 6. SKILL MANIFEST RESOURCE
+        // 6. EDIT AGENT CONFIG
+        server.tool(
+            'edit_agent_config',
+            'Update an agent\'s configuration',
+            {
+                agent_id: z.string().uuid(),
+                config: z.record(z.string(), z.any())
+            },
+            async ({ agent_id, config }) => {
+                checkAccess('edit_agent_config');
+                checkScope('write');
+                const { data: agent } = await fastify.supabase
+                    .from('agents')
+                    .select('project_id')
+                    .eq('id', agent_id)
+                    .single();
+
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                const encryptedConfig = cryptoUtils.encryptConfig(config);
+                await fastify.supabase
+                    .from('agent_desired_state')
+                    .update({ config: encryptedConfig, updated_at: new Date().toISOString() })
+                    .eq('agent_id', agent_id);
+
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'edit_agent_config', agentId: agent_id, status: 'success' });
+                return { content: [{ type: 'text', text: `Configuration updated for agent ${agent_id}` }] };
+            }
+        );
+
+        // 7. REMOVE AGENT
+        server.tool(
+            'remove_agent',
+            'Delete an agent permanently',
+            { agent_id: z.string().uuid() },
+            async ({ agent_id }) => {
+                checkAccess('remove_agent');
+                checkScope('write');
+                const { data: agent } = await fastify.supabase
+                    .from('agents')
+                    .select('project_id')
+                    .eq('id', agent_id)
+                    .single();
+
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                await fastify.supabase.from('agents').delete().eq('id', agent_id);
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'remove_agent', agentId: agent_id, status: 'success' });
+                return { content: [{ type: 'text', text: `Agent ${agent_id} removed permanently.` }] };
+            }
+        );
+
+        // 8. SEND MESSAGE
+        server.tool(
+            'send_message',
+            'Send a message to an agent\'s conversation log',
+            {
+                agent_id: z.string().uuid(),
+                content: z.string().min(1)
+            },
+            async ({ agent_id, content }) => {
+                checkAccess('send_message');
+                checkScope('write');
+
+                // Terminal guard: prevent /terminal usage in chat if missing execute/terminal scope
+                if (content.startsWith('/terminal')) {
+                    checkScope('terminal');
+                }
+
+                const { data: agent } = await fastify.supabase
+                    .from('agents')
+                    .select('project_id')
+                    .eq('id', agent_id)
+                    .single();
+
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                await fastify.supabase
+                    .from('agent_conversations')
+                    .insert({ agent_id, user_id: userId, content, sender: 'user' });
+
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'send_message', agentId: agent_id, status: 'success' });
+                return { content: [{ type: 'text', text: `Message delivered to agent ${agent_id}` }] };
+            }
+        );
+
+        // 9. SEND TERMINAL COMMAND
+        server.tool(
+            'send_terminal',
+            'Execute a command in the agent container terminal',
+            {
+                agent_id: z.string().uuid(),
+                command: z.string().min(1)
+            },
+            async ({ agent_id, command }) => {
+                checkAccess('send_terminal');
+                checkScope('terminal');
+
+                const { data: agent } = await fastify.supabase
+                    .from('agents')
+                    .select('project_id')
+                    .eq('id', agent_id)
+                    .single();
+
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                // We execute by posting a /terminal message to agent_conversations,
+                // which is then picked up by the worker's message bus.
+                await fastify.supabase
+                    .from('agent_conversations')
+                    .insert({ agent_id, user_id: userId, content: `/terminal ${command}`, sender: 'user' });
+
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'send_terminal', agentId: agent_id, status: 'success' });
+                return { content: [{ type: 'text', text: `Command '$ ${command}' queued for agent ${agent_id}` }] };
+            }
+        );
+
+        // 10. ACCOUNT & BILLING
+        server.tool(
+            'account_register',
+            'Register for a new account (Placeholder)',
+            { email: z.string() },
+            async () => {
+                return { content: [{ type: 'text', text: 'Account registration is currently handled via the web dashboard at https://blueprints-backend.onrender.com/signup' }] };
+            }
+        );
+
+        server.tool(
+            'pay_upgrade',
+            'Upgrade account tier (Placeholder)',
+            { tier: z.enum(['pro', 'enterprise']) },
+            async ({ tier }) => {
+                return { content: [{ type: 'text', text: `Upgrading to ${tier.toUpperCase()} is handled via the dashboard billing section. Please visit https://blueprints-backend.onrender.com/upgrade` }] };
+            }
+        );
+
+        // --- RESOURCES ---
+
+        server.resource(
+            'agent_config',
+            new ResourceTemplate('agent://{agent_id}/config', { list: undefined }),
+            async (uri, { agent_id }) => {
+                if (typeof agent_id !== 'string') throw new Error('Invalid agent_id');
+                const { data: agent } = await fastify.supabase.from('agents').select('project_id').eq('id', agent_id).single();
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                const { data: desired } = await fastify.supabase.from('agent_desired_state').select('config').eq('agent_id', agent_id).single();
+                let config = {};
+                if (desired?.config) {
+                    try { config = cryptoUtils.decryptConfig(desired.config); } catch (e) { config = { error: 'Failed to decrypt' }; }
+                }
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'resource:config', agentId: agent_id, status: 'success' });
+                return { contents: [{ uri: uri.href, text: JSON.stringify(config, null, 2) }] };
+            }
+        );
+
+        server.resource(
+            'agent_state',
+            new ResourceTemplate('agent://{agent_id}/state', { list: undefined }),
+            async (uri, { agent_id }) => {
+                if (typeof agent_id !== 'string') throw new Error('Invalid agent_id');
+                const { data: agent } = await fastify.supabase.from('agents').select('project_id').eq('id', agent_id).single();
+                if (!agent) throw new Error('Agent not found');
+                const { data: project } = await fastify.supabase.from('projects').select('user_id').eq('id', agent.project_id).single();
+                if (project?.user_id !== userId) throw new Error('Unauthorized');
+
+                const { data: actual } = await fastify.supabase.from('agent_actual_state').select('*').eq('agent_id', agent_id).single();
+                await auditService.log({ mcpKeyId: keyId, userId, toolName: 'resource:state', agentId: agent_id, status: 'success' });
+                return { contents: [{ uri: uri.href, text: JSON.stringify(actual, null, 2) }] };
+            }
+        );
+
         server.resource(
             'skill_manifest',
             'mcp://skill',
@@ -491,33 +498,17 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
                 const path = await import('path');
                 let content = '# Docs';
                 try {
-                    const docsPath = path.join(process.cwd(), '../../.agent/skills/mcp-server.md');
+                    const docsPath = path.join(process.cwd(), '../../docs/skills/mcp-server.md');
                     content = await fs.readFile(docsPath, 'utf-8');
                 } catch (e) { }
-
-                return {
-                    contents: [{
-                        uri: uri.href,
-                        text: content
-                    }]
-                };
+                return { contents: [{ uri: uri.href, text: content }] };
             }
         );
 
-        fastify.log.info({ userId, sessionId }, 'MCP SSE Connection Initialized');
+        return server;
+    };
 
-        await server.connect(transport);
-
-        reply.hijack();
-
-        // Cleanup on close
-        request.raw.on('close', () => {
-            transports.delete(sessionId);
-            fastify.log.debug({ sessionId }, 'MCP SSE Connection Closed');
-        });
-
-        await auditService.log({ mcpKeyId: keyId, userId, toolName: 'connect', status: 'success' });
-    });
+    // --- Routes ---
 
     // Discovery Endpoint (skill.json)
     fastify.get('/mcp/skill.json', async () => {
@@ -525,45 +516,72 @@ const mcpPlugin: FastifyPluginAsync = async (fastify) => {
             name: 'Blueprints MCP',
             description: 'Manage AI agents programmatically',
             version: '1.0.0',
-            mcp_endpoint: '/mcp/sse',
             docs_url: '/mcp/skill.md',
             capabilities: {
-                tools: ['list_agents', 'start_agent', 'stop_agent', 'create_agent', 'edit_agent_config', 'remove_agent', 'send_message'],
+                tools: ['list_agents', 'start_agent', 'stop_agent', 'create_agent', 'edit_agent_config', 'remove_agent', 'send_message', 'agent_status'],
                 resources: ['agent://{id}/state', 'agent://{id}/config', 'skill://manifest']
             }
         };
     });
 
-    // Serve mcp-server.md as a plain text/markdown route
+    // Serve mcp-server.md
     fastify.get('/mcp/skill.md', async (request, reply) => {
-        // We'll return the content of .agent/skills/mcp-server.md
-        // In this workspace, let's assume it's relative to the app root or just hardcode the response for portability.
-        // Actually, let's try to read it from the file system if we can find it.
         const fs = await import('fs/promises');
         const path = await import('path');
         try {
-            // Root is 2 levels up from backend/src
-            const docsPath = path.join(process.cwd(), '../../.agent/skills/mcp-server.md');
-            const content = await fs.readFile(docsPath, 'utf-8');
+            const docsPath = path.join(process.cwd(), '../../docs/skills/mcp-server.md');
+            let content = await fs.readFile(docsPath, 'utf-8');
+
+            // Dynamic URL substitution
+            const protocol = request.headers['x-forwarded-proto'] || 'http';
+            const host = request.headers.host || 'localhost:4000';
+            const baseUrl = `${protocol}://${host}`;
+            content = content.replace(/\$\{BASE_URL\}/g, baseUrl);
+
             return reply.type('text/markdown').send(content);
         } catch (e) {
             return reply.type('text/markdown').send('# Blueprints MCP Server\n\nDocumentation not found on disk.');
         }
     });
 
-    // Messages Endpoint - HANDLE MESSAGES via SessionID
+    // Messages Endpoint - Initialization and Tool Calls
     fastify.post('/mcp/messages', async (request, reply) => {
         const sessionId = (request.query as any).sessionId;
-        if (!sessionId) {
-            throw fastify.httpErrors.badRequest('Missing sessionId');
+        let transport: StreamableHTTPServerTransport | undefined;
+
+        if (sessionId) {
+            transport = transports.get(sessionId);
+            if (!transport) {
+                throw fastify.httpErrors.notFound('Session not found or expired');
+            }
+        } else {
+            // No sessionId provided -> Assume Initialization attempt
+            transport = new StreamableHTTPServerTransport({
+                sessionIdGenerator: () => crypto.randomUUID(),
+                enableJsonResponse: true // Allow returning tool results directly in POST response
+            });
+
+            const server = setupMcpServer(request, transport);
+            await server.connect(transport);
+            // sessionId will be generated during handleRequest if the payload is an 'initialize' request
         }
 
-        const transport = transports.get(sessionId);
-        if (!transport) {
-            throw fastify.httpErrors.notFound('Session not found or expired');
-        }
+        // Delegate handling to transport
+        await transport.handleRequest(request.raw, reply.raw);
 
-        await transport.handlePostMessage(request.raw, reply.raw);
+        // If this was a successful initialization, store the transport
+        if (!sessionId && transport.sessionId) {
+            transports.set(transport.sessionId, transport);
+            fastify.log.info({ sessionId: transport.sessionId }, 'New MCP Session Initialized');
+
+            // Log successful connect audit
+            await auditService.log({
+                mcpKeyId: request.mcpKey.id,
+                userId: request.mcpUser.id,
+                toolName: 'initialize',
+                status: 'success'
+            });
+        }
     });
 };
 

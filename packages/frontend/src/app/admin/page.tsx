@@ -41,6 +41,8 @@ export default function AdminDashboard() {
     const [allAgents, setAllAgents] = useState<any[]>([]);
     const [supportAgentId, setSupportAgentId] = useState<string | null>(null);
     const [isSavingSupport, setIsSavingSupport] = useState(false);
+    const [mcpEnabled, setMcpEnabled] = useState(false);
+    const [isTogglingMcp, setIsTogglingMcp] = useState(false);
     const supabase = createClient();
     const router = useRouter();
 
@@ -91,6 +93,15 @@ export default function AdminDashboard() {
             });
             if (aRes.ok) {
                 setAllAgents(await aRes.json());
+            }
+
+            // Fetch MCP Status
+            const mRes = await fetch(`${API_URL}/admin/system/mcp`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (mRes.ok) {
+                const mData = await mRes.json();
+                setMcpEnabled(mData.enabled);
             }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
@@ -176,6 +187,31 @@ export default function AdminDashboard() {
             const message = err instanceof Error ? err.message : 'Failed to update user tier';
             console.error('Failed to update user tier:', err);
             alert(message);
+        }
+    };
+
+    const handleToggleMcp = async () => {
+        setIsTogglingMcp(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch(`${API_URL}/admin/system/mcp`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${session?.access_token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ enabled: !mcpEnabled })
+            });
+
+            if (res.ok) {
+                setMcpEnabled(!mcpEnabled);
+            } else {
+                alert('Failed to toggle MCP.');
+            }
+        } catch (err) {
+            console.error('Failed to toggle MCP:', err);
+        } finally {
+            setIsTogglingMcp(false);
         }
     };
 
@@ -374,6 +410,25 @@ export default function AdminDashboard() {
                                 </div>
                                 <p className="text-[10px] text-muted-foreground font-medium">Designate an official agent for user support transmissions.</p>
                             </div>
+
+                            <button
+                                onClick={handleToggleMcp}
+                                disabled={isTogglingMcp}
+                                className={`w-full p-6 rounded-2xl border text-left transition-all group ${mcpEnabled ? 'bg-blue-500/10 border-blue-500/30' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                            >
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3">
+                                        <Activity size={18} className={mcpEnabled ? 'text-blue-400' : 'text-muted-foreground group-hover:text-white'} />
+                                        <span className={`font-black text-xs uppercase tracking-widest ${mcpEnabled ? 'text-blue-400' : ''}`}>
+                                            MCP Protocol: {mcpEnabled ? 'Active' : 'Offline'}
+                                        </span>
+                                    </div>
+                                    {isTogglingMcp ? <Loader2 size={16} className="animate-spin text-primary" /> : (
+                                        <div className={`size-4 rounded-full ${mcpEnabled ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)]' : 'bg-white/20'}`} />
+                                    )}
+                                </div>
+                                <p className="text-[10px] text-muted-foreground font-medium">Enable or disable system-wide Model Context Protocol access.</p>
+                            </button>
 
                             <button className="w-full p-6 rounded-2xl bg-white/5 border border-white/5 text-left hover:bg-white/10 transition-all group">
                                 <div className="flex items-center gap-3 mb-2">

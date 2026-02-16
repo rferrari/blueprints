@@ -1,11 +1,16 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Key, Copy, Plus, Loader2, Trash2, Shield } from 'lucide-react';
+import { Key, Copy, Plus, Loader2, Trash2, Shield, Lock } from 'lucide-react';
 import { useApiKeys } from '@/hooks/use-api-keys';
 import { useNotification } from '@/components/notification-provider';
 
-export default function ApiKeyManager() {
+interface ApiKeyManagerProps {
+    tier?: string;
+    onUpgrade?: () => void;
+}
+
+export default function ApiKeyManager({ tier = 'free', onUpgrade }: ApiKeyManagerProps) {
     const { keys, isLoading, generateKey, revokeKey } = useApiKeys();
     const { showNotification } = useNotification();
 
@@ -14,6 +19,10 @@ export default function ApiKeyManager() {
     const [generatedKey, setGeneratedKey] = useState<{ key: string; id: string } | null>(null);
 
     const handleGenerate = async () => {
+        if (tier === 'free') {
+            onUpgrade?.();
+            return;
+        }
         if (!newLabel.trim()) return;
         setIsGenerating(true);
         try {
@@ -52,7 +61,19 @@ export default function ApiKeyManager() {
             <div className="relative z-10">
                 <div className="mb-10 flex items-center justify-between">
                     <div>
-                        <h2 className="text-3xl font-black tracking-tight mb-2">MCP Access Keys</h2>
+                        <div className="flex items-center gap-3 mb-2">
+                            <h2 className="text-3xl font-black tracking-tight">MCP Access Keys</h2>
+                            {tier !== 'free' && (
+                                <a
+                                    href="/mcp/skill.md"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-[10px] font-black uppercase tracking-widest text-primary hover:bg-primary/20 transition-all"
+                                >
+                                    Documentation
+                                </a>
+                            )}
+                        </div>
                         <p className="text-muted-foreground font-medium">Manage API keys for programmatic access to your agents via the Model Context Protocol.</p>
                     </div>
                 </div>
@@ -108,13 +129,27 @@ export default function ApiKeyManager() {
                     </div>
                     <button
                         onClick={handleGenerate}
-                        disabled={!newLabel.trim() || isGenerating}
-                        className="h-[60px] px-8 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:opacity-90 active:scale-95 transition-all flex items-center gap-3 shadow-xl shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={(!newLabel.trim() && tier !== 'free') || isGenerating}
+                        className={`h-[60px] px-8 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center gap-3 shadow-xl ${tier === 'free'
+                                ? 'bg-white/10 text-white hover:bg-white/20 border border-white/10'
+                                : 'bg-primary text-white hover:opacity-90 shadow-primary/20 disabled:opacity-50'
+                            }`}
                     >
-                        {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                        Generate
+                        {isGenerating ? <Loader2 size={16} className="animate-spin" /> : (tier === 'free' ? <Lock size={16} /> : <Plus size={16} />)}
+                        {tier === 'free' ? 'Upgrade to Unlock' : 'Generate'}
                     </button>
                 </div>
+
+                {tier === 'free' && (
+                    <div className="mb-8 p-4 bg-primary/5 border border-primary/10 rounded-2xl flex items-center gap-4">
+                        <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                            <Shield size={16} />
+                        </div>
+                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest leading-relaxed">
+                            Pro & Enterprise users can manage multiple API keys for high-scale agent automation.
+                        </p>
+                    </div>
+                )}
 
                 {/* KEYS LIST */}
                 <div className="space-y-4">

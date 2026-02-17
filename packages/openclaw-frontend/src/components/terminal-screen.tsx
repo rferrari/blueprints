@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Loader2, Terminal as TerminalIcon, Command } from 'lucide-react';
+import { Loader2, Terminal as TerminalIcon } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { createClient } from '@/lib/supabase';
 import type { Agent } from '@/hooks/use-agent';
 
 interface Message {
@@ -23,6 +24,7 @@ export function TerminalScreen({ agent }: TerminalScreenProps) {
     const [sending, setSending] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const supabase = createClient();
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -32,6 +34,79 @@ export function TerminalScreen({ agent }: TerminalScreenProps) {
         scrollToBottom();
     }, [messages, scrollToBottom]);
 
+    // Initial fetch of recent history
+    useEffect(() => {
+        const fetchHistory = async () => {
+            const { data, error } = await supabase
+                .from('agent_conversations')
+                .select('*')
+                .eq('agent_id', agent.id)
+                .order('created_at', { ascending: false })
+                .limit(50);
+
+            if (!error && data) {
+                const history = data.reverse().map((msg: any) => ({
+                    id: msg.id,
+                    role: msg.sender === 'user' ? 'user' : 'assistant',
+                    content: msg.content,
+                    timestamp: new Date(msg.created_at),
+                    isCommand: msg.content.startsWith('/terminal')
+                }));
+                // Clean up /terminal prefix for display if it's a command
+                const cleanedHistory = history.map((msg: Message) => ({
+                    ...msg,
+                    content: msg.role === 'user' && msg.content.startsWith('/terminal ')
+                        ? msg.content.replace('/terminal ', '')
+                        : msg.content
+                }));
+                setMessages(cleanedHistory);
+            }
+        };
+
+        fetchHistory();
+
+        // Subscribe to new messages
+        const channel = supabase
+            .channel(`terminal-${agent.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'agent_conversations',
+                    filter: `agent_id=eq.${agent.id}`,
+                },
+                (payload) => {
+                    const newMsg = payload.new;
+                    const role = newMsg.sender === 'user' ? 'user' : 'assistant';
+
+                    // We might have already optimistically added the user message
+                    // So we could dedup, but for now simple append is safer for the "response" part.
+                    // Actually, let's just ignore own user messages arriving via socket to avoid easy duplication
+                    // OR specifically handle them.
+                    // For the "response", we definitely want it.
+
+                    if (role === 'assistant') {
+                        setMessages((prev) => [
+                            ...prev,
+                            {
+                                id: newMsg.id,
+                                role: 'assistant',
+                                content: newMsg.content,
+                                timestamp: new Date(newMsg.created_at),
+                                isCommand: false
+                            }
+                        ]);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [agent.id, supabase]);
+
     const sendCommand = async () => {
         const text = input.trim();
         if (!text || sending) return;
@@ -39,10 +114,11 @@ export function TerminalScreen({ agent }: TerminalScreenProps) {
         // Auto-prefix with /terminal if not present
         const commandContent = text.startsWith('/terminal') ? text : `/terminal ${text}`;
 
+        // Optimistic update
         const userMessage: Message = {
             id: crypto.randomUUID(),
             role: 'user',
-            content: text, // Show what user typed
+            content: text, // Show what user typed (without prefix if they didn't type it)
             timestamp: new Date(),
             isCommand: true
         };
@@ -56,21 +132,7 @@ export function TerminalScreen({ agent }: TerminalScreenProps) {
                 method: 'POST',
                 body: JSON.stringify({ content: commandContent }),
             });
-
-            // We don't get the output immediately from this endpoint. 
-            // In a real implementation, we would listen to a socket.
-            // For now, we simulate "Command sent" or maybe fetch history?
-            // But since the user said "get responses from inside docker", 
-            // and the backend routes output to `agent_conversations`,
-            // we probably need to POLL or SUBSCRIPBE to `agent_conversations`.
-            // For this iteration, I'll simulate an ack.
-
-            // Note: The actual output will appear in the "Chat" unless I filter it.
-            // But here I want to show the output.
-            // I should implement fetching of recent messages that are terminal outputs.
-            // But without a dedicated "get terminal logs" endpoint, it's tricky.
-            // I'll assume the backend echoes the output as a new message.
-
+            // Output will arrive via subscription
         } catch {
             const errorMessage: Message = {
                 id: crypto.randomUUID(),
@@ -81,7 +143,6 @@ export function TerminalScreen({ agent }: TerminalScreenProps) {
             setMessages(prev => [...prev, errorMessage]);
         } finally {
             setSending(false);
-            // Keep focus
             inputRef.current?.focus();
         }
     };

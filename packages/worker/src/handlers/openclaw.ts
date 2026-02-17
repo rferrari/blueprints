@@ -99,7 +99,12 @@ export async function startOpenClawAgent(
         finalConfig.agents.defaults.workspace = "/agent-home/.openclaw/workspace";
 
         // Also force for any specific agent in the list to avoid UUID suffixes
-        if (Array.isArray(finalConfig.agents.list)) {
+        if (!finalConfig.agents.list || !Array.isArray(finalConfig.agents.list) || finalConfig.agents.list.length === 0) {
+            finalConfig.agents.list = [{
+                id: agentId,
+                workspace: "/agent-home/.openclaw/workspace"
+            }];
+        } else {
             finalConfig.agents.list.forEach((a: any) => {
                 a.workspace = "/agent-home/.openclaw/workspace";
 

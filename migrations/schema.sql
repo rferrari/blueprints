@@ -346,3 +346,84 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.support_conversations;
     END IF;
 END $$;
+
+-- 15. Missing Tables from Blueprints Sync
+
+-- Managed Provider Keys
+CREATE TABLE IF NOT EXISTS public.managed_provider_keys (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    provider TEXT DEFAULT 'openrouter',
+    label TEXT,
+    encrypted_key TEXT,
+    active BOOLEAN DEFAULT true,
+    config JSONB DEFAULT '{}'::jsonb,
+    daily_limit_usd NUMERIC,
+    monthly_limit_usd NUMERIC,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.managed_provider_keys ENABLE ROW LEVEL SECURITY;
+
+-- Key Leases
+CREATE TABLE IF NOT EXISTS public.key_leases (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    managed_key_id UUID REFERENCES public.managed_provider_keys(id) NOT NULL,
+    user_id UUID REFERENCES public.profiles(id) NOT NULL,
+    agent_id UUID REFERENCES public.agents(id),
+    granted_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'expired', 'revoked')),
+    usage_usd NUMERIC DEFAULT 0,
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    max_agents INTEGER DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.key_leases ENABLE ROW LEVEL SECURITY;
+
+-- Blueprints
+CREATE TABLE IF NOT EXISTS public.blueprints (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    framework TEXT NOT NULL,
+    config JSONB DEFAULT '{}'::jsonb NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    created_by UUID REFERENCES auth.users(id)
+);
+ALTER TABLE public.blueprints ENABLE ROW LEVEL SECURITY;
+
+-- User API Keys
+CREATE TABLE IF NOT EXISTS public.user_api_keys (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) NOT NULL,
+    label TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    scopes JSONB DEFAULT '[]'::jsonb,
+    is_active BOOLEAN DEFAULT true,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.user_api_keys ENABLE ROW LEVEL SECURITY;
+
+-- MCP Audit Logs
+CREATE TABLE IF NOT EXISTS public.mcp_audit_logs (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    mcp_key_id UUID REFERENCES public.user_api_keys(id),
+    user_id UUID REFERENCES auth.users(id),
+    tool_name TEXT NOT NULL,
+    agent_id UUID,
+    payload_summary JSONB,
+    status TEXT NOT NULL,
+    error_code TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.mcp_audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- Updates to existing tables
+ALTER TABLE public.agent_actual_state ADD COLUMN IF NOT EXISTS version TEXT;
+ALTER TABLE public.agent_actual_state ADD COLUMN IF NOT EXISTS stats JSONB DEFAULT '{}'::jsonb;
+

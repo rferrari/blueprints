@@ -2,20 +2,22 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/auth-provider';
-import { apiFetch, apiPost, apiPatch } from '@/lib/api';
+import { createClient } from '@/lib/supabase';
+import { apiFetch, apiPost } from '@/lib/api';
 
 export interface Agent {
     id: string;
     name: string;
     framework: string;
-    status: string;
-    agent_desired_state: Record<string, unknown>[];
     created_at: string;
-}
-
-interface Profile {
-    id: string;
-    metadata: Record<string, unknown>;
+    agent_actual_state?: {
+        status: string;
+        endpoint_url?: string;
+    };
+    agent_desired_state?: {
+        enabled: boolean;
+        config: Record<string, unknown>;
+    }[];
 }
 
 interface Project {
@@ -35,6 +37,7 @@ export function useAgent(): UseAgentReturn {
     const [agent, setAgent] = useState<Agent | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const supabase = createClient();
 
     const fetchOrCreateAgent = useCallback(async () => {
         if (!user) {
@@ -46,70 +49,104 @@ export function useAgent(): UseAgentReturn {
         setError(null);
 
         try {
-            // 1. Get user profile to check metadata
-            const profile = await apiFetch<Profile>('/profiles/me');
-            const agentId = profile.metadata?.openclaw_agent_id as string | undefined;
+            // 1. Check user metadata for agent ID
+            let agentId = user.user_metadata?.openclaw_agent_id as string | undefined;
 
             if (agentId) {
-                try {
-                    const existingAgent = await apiFetch<Agent>(`/agents/${agentId}`);
-                    setAgent(existingAgent);
+                console.log('Fetching agent from metadata:', agentId);
+                const { data: existingAgent, error: fetchError } = await supabase
+                    .from('agents')
+                    .select('*, agent_actual_state(*), agent_desired_state(*)')
+                    .eq('id', agentId)
+                    .single();
+
+                if (!fetchError && existingAgent) {
+                    setAgent(existingAgent as unknown as Agent);
                     setLoading(false);
                     return;
-                } catch {
-                    // If fetching specific agent fails, proceed to creation or fallback
                 }
+                console.warn('Agent from metadata not found, falling back');
             }
 
-            // 2. If not found in metadata, check if any openclaw agent exists already (fallback)
-            const agents = await apiFetch<Agent[]>('/agents');
-            const openclawAgent = agents.find(a => a.framework === 'openclaw');
+            // 2. Fallback: Search for any OpenClaw agent owned by user
+            console.log('Searching for existing OpenClaw agents');
+            // We need to join with projects to check user_id
+            const { data: userAgents, error: searchError } = await supabase
+                .from('agents')
+                .select('*, projects!inner(user_id), agent_actual_state(*), agent_desired_state(*)')
+                .eq('framework', 'openclaw')
+                .eq('projects.user_id', user.id)
+                .limit(1);
 
-            if (openclawAgent) {
-                setAgent(openclawAgent);
-                // Update profile metadata if missing
-                await apiPatch('/profiles/me', {
-                    metadata: { ...profile.metadata, openclaw_agent_id: openclawAgent.id }
+            if (!searchError && userAgents && userAgents.length > 0) {
+                const foundAgent = userAgents[0];
+                console.log('Found existing agent:', foundAgent.id);
+                setAgent(foundAgent as unknown as Agent);
+
+                // Update metadata for faster recovery next time
+                await supabase.auth.updateUser({
+                    data: { openclaw_agent_id: foundAgent.id }
                 });
+
+                setLoading(false);
+                return;
+            }
+
+            // 3. Auto-creation sequence
+            console.log('Initiating agent creation flow');
+
+            // Step A: Get default blueprint ID
+            const { data: blueprintSetting } = await supabase
+                .from('system_settings')
+                .select('value')
+                .eq('key', 'openclaw_default_blueprint')
+                .single();
+
+            const blueprintId = (blueprintSetting?.value as string) || '2d25b0f6-fc05-4cb9-882a-f5fa05ec54da';
+
+            // Step B: Ensure project exists
+            let projectId: string;
+            const projects = await apiFetch<Project[]>('/projects');
+
+            if (projects && projects.length > 0) {
+                projectId = projects[0].id;
             } else {
-                // 3. Auto-create Flow: Settings -> Project -> Agent -> Profile
-
-                // Get default blueprint (Assume proxy endpoint or fallback to known ID if needed)
-                let blueprintId = '2d25b0f6-fc05-4cb9-882a-f5fa05ec54da';
-                try {
-                    const setting = await apiFetch<{ value: string }>('/system-settings/openclaw_default_blueprint');
-                    blueprintId = setting.value;
-                } catch {
-                    // Fallback to the requested ID
-                }
-
-                // Create Project
-                const project = await apiPost<Project>('/projects', {
-                    name: 'OpenClaw Project'
+                const newProject = await apiPost<Project>('/projects', {
+                    name: 'My Workspace'
                 });
-
-                // Create Agent
-                const newAgent = await apiPost<Agent>('/agents', {
-                    name: 'My Agent',
-                    framework: 'openclaw',
-                    project_id: project.id,
-                    blueprint_id: blueprintId
-                });
-
-                // Update Profile Metadata
-                await apiPatch('/profiles/me', {
-                    metadata: { ...profile.metadata, openclaw_agent_id: newAgent.id }
-                });
-
-                setAgent(newAgent);
+                projectId = newProject.id;
             }
+
+            // Step C: Create Agent
+            console.log('Creating agent in project:', projectId);
+            const newAgent = await apiPost<Agent>(`/agents/project/${projectId}`, {
+                name: 'OpenClaw Persona',
+                framework: 'openclaw',
+                templateId: blueprintId
+            });
+
+            // Step D: Update metadata
+            await supabase.auth.updateUser({
+                data: { openclaw_agent_id: newAgent.id }
+            });
+
+            // Fetch the full agent state (since POST /agents/project/:id returns basic agent)
+            const { data: fullAgent } = await supabase
+                .from('agents')
+                .select('*, agent_actual_state(*), agent_desired_state(*)')
+                .eq('id', newAgent.id)
+                .single();
+
+            setAgent((fullAgent as unknown as Agent) || newAgent);
+
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to load agent';
+            console.error('Agent flow error:', err);
+            const message = err instanceof Error ? err.message : 'Failed to setup agent';
             setError(message);
         } finally {
             setLoading(false);
         }
-    }, [user]);
+    }, [user, supabase]);
 
     useEffect(() => {
         fetchOrCreateAgent();

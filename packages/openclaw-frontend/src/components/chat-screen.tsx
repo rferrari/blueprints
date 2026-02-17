@@ -66,7 +66,7 @@ export function ChatScreen({ agent }: ChatScreenProps) {
             // Stub: Call backend chat API
             const response = await apiFetch<{ message: string }>(`/agents/${agent.id}/chat`, {
                 method: 'POST',
-                body: JSON.stringify({ message: text }),
+                body: JSON.stringify({ content: text }),
             });
 
             const assistantMessage: Message = {

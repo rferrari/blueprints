@@ -313,7 +313,19 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
             fastify.log.info({ agentId }, 'Updating agent config');
             updates.config = cryptoUtils.encryptConfig(config);
         }
-        if (metadata !== undefined) updates.metadata = metadata;
+        if (metadata !== undefined) {
+            // Fetch existing metadata to merge
+            const { data: existingState } = await fastify.supabase
+                .from('agent_desired_state')
+                .select('metadata')
+                .eq('agent_id', agentId)
+                .single();
+
+            updates.metadata = {
+                ...(existingState?.metadata || {}),
+                ...metadata
+            };
+        }
         if (purge_at !== undefined) {
             fastify.log.debug({ agentId, purge_at }, 'Processing purge_at update');
             updates.purge_at = purge_at;

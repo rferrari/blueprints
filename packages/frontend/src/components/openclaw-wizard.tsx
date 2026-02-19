@@ -25,7 +25,8 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
     const [showAllModels, setShowAllModels] = useState(false);
     const [jsonMode, setJsonMode] = useState(false);
     const [name, setName] = useState(agent.name || '');
-    const [avatar, setAvatar] = useState(getOne(agent.agent_desired_state)?.metadata?.avatar || '');
+    const [metadata, setMetadata] = useState<Record<string, any>>(getOne(agent.agent_desired_state)?.metadata || {});
+    const [avatar, setAvatar] = useState(metadata.avatar || '');
 
     // Tier & Security
     const supabase = createClient();
@@ -77,7 +78,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
     // Initial State derived from existing config or defaults
     const [config, setConfig] = useState<OpenClawConfig>({
-        provider: existingConfig.auth?.profiles?.['default']?.provider || 'venice', // Default to Venice
+        provider: metadata.lease_id ? 'blueprint_shared' : (existingConfig.auth?.profiles?.['default']?.provider || 'venice'),
         mode: 'api_key', // Enforce API Key
         // If editing, we start with an empty token to allow "leave blank to keep same"
         token: '',
@@ -283,6 +284,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
 
                 // Save with lease metadata — backend already wrote the provider config
                 await onSave(undefined, {
+                    ...metadata,
                     security_level: securityLevel,
                     avatar,
                     lease_id: leaseData.lease_id,
@@ -356,7 +358,11 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
                 }
             };
 
-            await onSave(finalConfig, { security_level: securityLevel, avatar }, name);
+            await onSave(finalConfig, {
+                ...metadata,
+                security_level: securityLevel,
+                avatar
+            }, name);
             onClose();
         } catch (err: unknown) {
             console.error('Failed to save OpenClaw config:', err);

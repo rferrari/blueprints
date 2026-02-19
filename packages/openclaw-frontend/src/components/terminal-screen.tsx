@@ -254,7 +254,7 @@ export function TerminalScreen({ agent }: TerminalScreenProps) {
             {/* Terminal Header */}
             <div className="flex items-center px-4 py-2 border-b border-white/10 bg-black/20 text-xs text-muted-foreground">
                 <TerminalIcon size={14} className="mr-2" />
-                <span>{agent.name}@openclaw:~/workspace</span>
+                <span>{agent.name}@openclaw:/agent-home</span>
                 <div className="ml-auto flex items-center gap-3">
                     <button
                         onClick={clearMessages}

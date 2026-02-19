@@ -80,6 +80,11 @@ export async function startOpenClawAgent(
                 ...(config.gateway || {}),
                 mode: 'local',
                 bind: 'lan',
+                auth: {
+                    mode: 'token',
+                    token: config.gateway?.auth?.token || Buffer.from(Math.random().toString()).toString('base64').substring(0, 16),
+                    ...(config.gateway?.auth || {}),
+                },
                 http: {
                     ...(config.gateway?.http || {}),
                     endpoints: {
@@ -89,6 +94,11 @@ export async function startOpenClawAgent(
                 }
             }
         };
+
+        // Ensure token is generated even if gateway.auth existed but token was missing
+        if (!configWithDefaults.gateway.auth.token || configWithDefaults.gateway.auth.token === 'auto-generated-on-creation') {
+            configWithDefaults.gateway.auth.token = Buffer.from(Math.random().toString()).toString('base64').substring(0, 16);
+        }
 
         const decrypted = cryptoUtils.decryptConfig(configWithDefaults);
         const finalConfig = sanitizeConfig(decrypted);
@@ -209,6 +219,7 @@ export async function startOpenClawAgent(
                 Binds: [`${path.join(absoluteHostPath, agentId, 'home')}:/agent-home`],
                 PortBindings: { '18789/tcp': [{ HostPort: hostPort.toString(), HostIp: '127.0.0.1' }] },
                 RestartPolicy: { Name: 'unless-stopped' },
+                AutoRemove: false,
 
                 CapAdd: capAdd,
                 CapDrop: effectiveLevel === SecurityLevel.STANDARD ? ['ALL'] : undefined,

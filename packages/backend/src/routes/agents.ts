@@ -35,6 +35,36 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
         return data;
     });
 
+    // Get single agent
+    fastify.get('/:agentId', async (request) => {
+        const { agentId } = request.params as { agentId: string };
+
+        // Verify agent ownership via project
+        const { data: agent, error: aError } = await fastify.supabase
+            .from('agents')
+            .select('*, agent_desired_state(*), agent_actual_state(*)')
+            .eq('id', agentId)
+            .single();
+
+        if (aError || !agent) {
+            throw fastify.httpErrors.notFound('Agent not found');
+        }
+
+        const { data: project } = await fastify.supabase
+            .from('projects')
+            .select('id')
+            .eq('id', agent.project_id)
+            .eq('user_id', request.userId)
+            .single();
+
+        if (!project) {
+            throw fastify.httpErrors.forbidden('Not authorized');
+        }
+
+        return agent;
+    });
+
+
     // Create/Install agent in a project
     fastify.post('/project/:projectId', async (request, reply) => {
         const { projectId } = request.params as { projectId: string };
@@ -118,80 +148,120 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
         if (agentError) throw agentError;
 
         // 4. Initialize desired state
-        const initialConfig = configTemplate || (framework === 'openclaw' ? {
-            auth: {
-                profiles: {
-                    default: { provider: 'venice', mode: 'api_key', token: '' }
-                }
-            },
-            gateway: {
-                auth: { mode: 'token', token: Buffer.from(Math.random().toString()).toString('base64').substring(0, 16) }
-            },
-            agents: {
-                defaults: {
-                    workspace: "~/.openclaw/workspace",
-                    maxConcurrent: 4,
-                    subagents: {
-                        maxConcurrent: 4
+        let initialConfig: any = configTemplate;
+
+        if (!initialConfig) {
+            if (framework === 'openclaw') {
+                initialConfig = {
+                    auth: {
+                        profiles: {
+                            default: { provider: 'venice', mode: 'api_key' }
+                        }
                     },
-                    compaction: {
-                        mode: "safeguard"
+                    agents: {
+                        defaults: {
+                            model: {
+                                primary: "venice/llama-3.3-70b"
+                            },
+                            models: {
+                                "venice/llama-3.3-70b": {}
+                            },
+                            workspace: "/home/node/.openclaw/workspace"
+                        }
                     },
-                },
-                list: [
-                    {
-                        id: "main",
-                        name,
-                        workspace: "~/.openclaw/workspace"
-                    }
-                ]
+                    models: {
+                        providers: {
+                            venice: {
+                                apiKey: "",
+                                models: [
+                                    {
+                                        id: "llama-3.3-70b",
+                                        api: "openai-completions",
+                                        name: "llama-3.3-70b",
+                                        compat: {}
+                                    }
+                                ],
+                                baseUrl: "https://api.venice.ai/api/v1"
+                            }
+                        }
+                    },
+                    channels: {}
+                };
+            } else if (framework === 'picoclaw') {
+                initialConfig = {
+                    agents: {
+                        defaults: {
+                            workspace: "~/.picoclaw/workspace",
+                            restrict_to_workspace: true,
+                            model: "glm-4.7",
+                            max_tokens: 8192,
+                            temperature: 0.7,
+                            max_tool_iterations: 20
+                        }
+                    },
+                    channels: {
+                        telegram: { enabled: false, token: "YOUR_TELEGRAM_BOT_TOKEN", proxy: "", allow_from: ["YOUR_USER_ID"] },
+                        discord: { enabled: false, token: "YOUR_DISCORD_BOT_TOKEN", allow_from: [] },
+                        maixcam: { enabled: false, host: "0.0.0.0", port: 18790, allow_from: [] },
+                        whatsapp: { enabled: false, bridge_url: "ws://localhost:3001", allow_from: [] },
+                        feishu: { enabled: false, app_id: "", app_secret: "", encrypt_key: "", verification_token: "", allow_from: [] },
+                        dingtalk: { enabled: false, client_id: "YOUR_CLIENT_ID", client_secret: "YOUR_CLIENT_SECRET", allow_from: [] },
+                        slack: { enabled: false, bot_token: "xoxb-YOUR-BOT-TOKEN", app_token: "xapp-YOUR-APP-TOKEN", allow_from: [] },
+                        line: { enabled: false, channel_secret: "YOUR_LINE_CHANNEL_SECRET", channel_access_token: "YOUR_LINE_CHANNEL_ACCESS_TOKEN", webhook_host: "0.0.0.0", webhook_port: 18791, webhook_path: "/webhook/line", allow_from: [] }
+                    },
+                    providers: {
+                        anthropic: { api_key: "", api_base: "" },
+                        openai: { api_key: "", api_base: "" },
+                        openrouter: { api_key: "sk-or-v1-xxx", api_base: "" },
+                        groq: { api_key: "gsk_xxx", api_base: "" },
+                        zhipu: { api_key: "YOUR_ZHIPU_API_KEY", api_base: "" },
+                        gemini: { api_key: "", api_base: "" },
+                        vllm: { api_key: "", api_base: "" },
+                        nvidia: { api_key: "nvapi-xxx", api_base: "", proxy: "http://127.0.0.1:7890" },
+                        moonshot: { api_key: "sk-xxx", api_base: "" }
+                    },
+                    tools: {
+                        web: { search: { api_key: "YOUR_BRAVE_API_KEY", max_results: 5 } }
+                    },
+                    heartbeat: { enabled: false, interval: 30 },
+                    gateway: { host: "0.0.0.0", port: 18790 }
+                };
+            } else {
+                initialConfig = {
+                    name,
+                    modelProvider: 'openai',
+                    bio: [`I am ${name}, a new AI agent.`],
+                    plugins: [
+                        '@elizaos/plugin-bootstrap',
+                        '@elizaos/plugin-openai',
+                    ]
+                };
             }
-        } : framework === 'picoclaw' ? {
-            agents: {
-                defaults: {
-                    workspace: "~/.picoclaw/workspace",
-                    restrict_to_workspace: true,
-                    model: "glm-4.7",
-                    max_tokens: 8192,
-                    temperature: 0.7,
-                    max_tool_iterations: 20
-                }
-            },
-            channels: {
-                telegram: { enabled: false, token: "YOUR_TELEGRAM_BOT_TOKEN", proxy: "", allow_from: ["YOUR_USER_ID"] },
-                discord: { enabled: false, token: "YOUR_DISCORD_BOT_TOKEN", allow_from: [] },
-                maixcam: { enabled: false, host: "0.0.0.0", port: 18790, allow_from: [] },
-                whatsapp: { enabled: false, bridge_url: "ws://localhost:3001", allow_from: [] },
-                feishu: { enabled: false, app_id: "", app_secret: "", encrypt_key: "", verification_token: "", allow_from: [] },
-                dingtalk: { enabled: false, client_id: "YOUR_CLIENT_ID", client_secret: "YOUR_CLIENT_SECRET", allow_from: [] },
-                slack: { enabled: false, bot_token: "xoxb-YOUR-BOT-TOKEN", app_token: "xapp-YOUR-APP-TOKEN", allow_from: [] },
-                line: { enabled: false, channel_secret: "YOUR_LINE_CHANNEL_SECRET", channel_access_token: "YOUR_LINE_CHANNEL_ACCESS_TOKEN", webhook_host: "0.0.0.0", webhook_port: 18791, webhook_path: "/webhook/line", allow_from: [] }
-            },
-            providers: {
-                anthropic: { api_key: "", api_base: "" },
-                openai: { api_key: "", api_base: "" },
-                openrouter: { api_key: "sk-or-v1-xxx", api_base: "" },
-                groq: { api_key: "gsk_xxx", api_base: "" },
-                zhipu: { api_key: "YOUR_ZHIPU_API_KEY", api_base: "" },
-                gemini: { api_key: "", api_base: "" },
-                vllm: { api_key: "", api_base: "" },
-                nvidia: { api_key: "nvapi-xxx", api_base: "", proxy: "http://127.0.0.1:7890" },
-                moonshot: { api_key: "sk-xxx", api_base: "" }
-            },
-            tools: {
-                web: { search: { api_key: "YOUR_BRAVE_API_KEY", max_results: 5 } }
-            },
-            heartbeat: { enabled: false, interval: 30 },
-            gateway: { host: "0.0.0.0", port: 18790 }
-        } : {
-            name,
-            modelProvider: 'openai',
-            bio: [`I am ${name}, a new AI agent.`],
-            plugins: [
-                '@elizaos/plugin-bootstrap',
-                '@elizaos/plugin-openai',
-            ]
-        });
+        }
+
+        // Force gateway block for OpenClaw even if provided by blueprint/configTemplate
+        if (framework === 'openclaw') {
+            if (!initialConfig.gateway) {
+                initialConfig.gateway = {
+                    mode: "local",
+                    bind: "lan",
+                    http: {
+                        endpoints: {
+                            chatCompletions: { enabled: true }
+                        }
+                    }
+                };
+            }
+            if (!initialConfig.gateway.auth) {
+                initialConfig.gateway.auth = { mode: 'token' };
+            }
+
+            const gwAuth = initialConfig.gateway.auth;
+            // Ensure token is generated or updated if placeholder
+            if (!gwAuth.token || gwAuth.token === 'auto-generated-on-creation') {
+                gwAuth.token = Buffer.from(Math.random().toString()).toString('base64').substring(0, 16);
+            }
+        }
 
         const { metadata } = CreateAgentSchema.parse(request.body);
 

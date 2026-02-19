@@ -2,9 +2,9 @@ import http from 'node:http';
 import { logger } from './logger';
 
 export const docker = {
-    async _request(method: string, path: string, body?: any): Promise<any> {
+    async _request(method: string, path: string, body?: any, options: { buffer?: boolean } = {}): Promise<any> {
         return new Promise((resolve, reject) => {
-            const options = {
+            const reqOptions = {
                 socketPath: '/var/run/docker.sock',
                 path: `/v1.44${path}`,
                 method,
@@ -12,22 +12,30 @@ export const docker = {
             };
 
             const startTime = Date.now();
-            const req = http.request(options, (res) => {
-                let data = '';
-                res.on('data', (chunk) => data += chunk);
+            const req = http.request(reqOptions, (res) => {
+                const chunks: Buffer[] = [];
+                res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
                 res.on('end', () => {
+                    const data = Buffer.concat(chunks);
                     const duration = Date.now() - startTime;
                     logger.debug(`Docker API: [${method} ${path}] Response ended. Status: ${res.statusCode}. Duration: ${duration}ms. Data length: ${data.length}`);
+
                     if (res.statusCode && res.statusCode >= 400) {
-                        const err = new Error(`Docker API Error (${res.statusCode}): ${data}`);
+                        const err = new Error(`Docker API Error (${res.statusCode}): ${data.toString()}`);
                         (err as any).status = res.statusCode;
-                        (err as any).data = data;
+                        (err as any).data = data.toString();
                         return reject(err);
                     }
+
+                    if (options.buffer) {
+                        return resolve(data);
+                    }
+
+                    const dataStr = data.toString();
                     try {
-                        resolve(data ? JSON.parse(data) : {});
+                        resolve(dataStr ? JSON.parse(dataStr) : {});
                     } catch (e) {
-                        resolve(data);
+                        resolve(dataStr);
                     }
                 });
             });
@@ -52,11 +60,21 @@ export const docker = {
 
     async getContainer(name: string) {
         return {
-            inspect: () => this._request('GET', `/containers/${name}/json`),
-            start: () => this._request('POST', `/containers/${name}/start`),
-            stop: () => this._request('POST', `/containers/${name}/stop`),
-            remove: () => this._request('DELETE', `/containers/${name}?v=true&force=true`),
-            wait: () => this._request('POST', `/containers/${name}/wait`)
+            inspect: () => docker._request('GET', `/containers/${name}/json`),
+            start: () => docker._request('POST', `/containers/${name}/start`),
+            stop: () => docker._request('POST', `/containers/${name}/stop`),
+            remove: () => docker._request('DELETE', `/containers/${name}?v=true&force=true`),
+            wait: () => docker._request('POST', `/containers/${name}/wait`),
+            logs: async (options: { stdout?: boolean, stderr?: boolean, tail?: number | string } = { stdout: true, stderr: true }) => {
+                const query = new URLSearchParams({
+                    stdout: String(options.stdout ?? true),
+                    stderr: String(options.stderr ?? true),
+                    tail: String(options.tail ?? 'all'),
+                    follow: 'false'
+                }).toString();
+                const path = `/containers/${name}/logs?${query}`;
+                return docker._request('GET', path, undefined, { buffer: true });
+            }
         };
     },
 
@@ -76,13 +94,13 @@ export const docker = {
 
     async pullImage(name: string): Promise<void> {
         return new Promise((resolve, reject) => {
-            const options = {
+            const reqOptions = {
                 socketPath: '/var/run/docker.sock',
                 path: `/v1.44/images/create?fromImage=${encodeURIComponent(name)}`,
                 method: 'POST'
             };
 
-            const req = http.request(options, (res) => {
+            const req = http.request(reqOptions, (res) => {
                 if (res.statusCode !== 200) {
                     let data = '';
                     res.on('data', chunk => data += chunk);

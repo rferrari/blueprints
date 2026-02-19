@@ -81,7 +81,7 @@ export default function OpenClawWizard({ agent, onSave, onClose }: OpenClawWizar
         mode: 'api_key', // Enforce API Key
         // If editing, we start with an empty token to allow "leave blank to keep same"
         token: '',
-        gatewayToken: existingConfig.gateway?.auth?.token || Math.random().toString(36).substring(2, 15),
+        gatewayToken: existingConfig.gateway?.auth?.token || 'auto-generated-on-creation',
         modelId: existingConfig.agents?.defaults?.model?.primary?.split('/').pop() || 'llama-3.3-70b',
 
         // Channels

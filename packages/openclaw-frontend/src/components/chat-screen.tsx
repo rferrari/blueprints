@@ -38,23 +38,19 @@ export function ChatScreen({ agent }: ChatScreenProps) {
     // Initial fetch and Subscription
     useEffect(() => {
         const fetchHistory = async () => {
-            const { data, error } = await supabase
-                .from('agent_conversations')
-                .select('*')
-                .eq('agent_id', agent.id)
-                .order('created_at', { ascending: false })
-                .limit(50);
-
-            if (!error && data) {
-                const history: Message[] = data.reverse().map((msg: any) => ({
-                    id: msg.id,
-                    role: (msg.sender === 'user' ? 'user' : 'assistant') as "user" | "assistant",
-                    content: msg.content,
-                    timestamp: new Date(msg.created_at),
-                }));
-                // Filter out commands meant only for terminal if desired
-                // For now, let's just show everything.
-                setMessages(history);
+            try {
+                const data = await apiFetch<any[]>(`/agents/${agent.id}/chat`);
+                if (data) {
+                    const history: Message[] = data.reverse().map((msg: any) => ({
+                        id: msg.id,
+                        role: (msg.sender === 'user' ? 'user' : 'assistant') as "user" | "assistant",
+                        content: msg.content,
+                        timestamp: new Date(msg.created_at),
+                    }));
+                    setMessages(history);
+                }
+            } catch (err) {
+                console.error('Failed to fetch chat history:', err);
             }
         };
 

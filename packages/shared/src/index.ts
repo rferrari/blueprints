@@ -235,9 +235,13 @@ export const OpenClawConfigSchema = z.object({
     }).optional(),
     gateway: z.object({
         auth: z.object({
+            mode: z.enum(['token', 'none']).optional(),
             token: z.string().optional()
         }).optional(),
         bind: z.string().optional(),
+        host: z.string().optional(),
+        port: z.number().optional(),
+        mode: z.string().optional(),
         http: z.object({
             endpoints: z.object({
                 chatCompletions: z.object({

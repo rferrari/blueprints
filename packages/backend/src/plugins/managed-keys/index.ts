@@ -21,7 +21,7 @@ const buildAgentConfig = (selectedKey: any, existingConfig: any, framework: stri
 
     if (framework === 'openclaw') {
         const frameworkOverrides = managedConfig.frameworks?.openclaw || {};
-        return {
+        const config = {
             ...existingConfig,
             auth: {
                 ...(existingConfig.auth || {}),
@@ -29,8 +29,7 @@ const buildAgentConfig = (selectedKey: any, existingConfig: any, framework: stri
                     ...(existingConfig.auth?.profiles || {}),
                     'default': {
                         provider: providerName,
-                        mode: 'api_key',
-                        token: selectedKey.encrypted_key // Backwards compatibility for some versions
+                        mode: 'api_key'
                     },
                 },
             },
@@ -60,8 +59,30 @@ const buildAgentConfig = (selectedKey: any, existingConfig: any, framework: stri
                     workspace: "/agent-home/.openclaw/workspace"
                 },
             },
+            // Ensure gateway is preserved or initialized
+            gateway: existingConfig.gateway || {
+                mode: "local",
+                bind: "lan",
+                http: {
+                    endpoints: {
+                        chatCompletions: { enabled: true }
+                    }
+                },
+                auth: {
+                    mode: 'token',
+                    token: Buffer.from(Math.random().toString()).toString('base64').substring(0, 16)
+                }
+            },
             ...frameworkOverrides,
         };
+
+        // Ensure token exists even if gateway existed but auth/token didn't
+        if (!config.gateway.auth) config.gateway.auth = { mode: 'token' };
+        if (!config.gateway.auth.token) {
+            config.gateway.auth.token = Buffer.from(Math.random().toString()).toString('base64').substring(0, 16);
+        }
+
+        return config;
     } else {
         const frameworkOverrides = managedConfig.frameworks?.[framework] || {};
         return {

@@ -55,7 +55,12 @@ export function sanitizeConfig(config: any): any {
             if (profile && typeof profile === 'object') {
                 // OpenClaw validation used to fail if 'token' was present.
                 // However, we now need it for backwards compatibility if mode is token or api_key.
-                // We only delete it if it's explicitly not needed.
+                // In newest OpenClaw, the field is 'key' for api_key mode.
+                if (profile.mode === 'api_key' && (profile as any).apiKey) {
+                    (profile as any).key = (profile as any).apiKey;
+                    delete (profile as any).apiKey;
+                }
+
                 if (profile.mode === 'oauth') {
                     delete (profile as any).token;
                 }

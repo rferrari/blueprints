@@ -5,6 +5,7 @@ import './globals.css';
 import { AuthProvider } from '@/components/auth-provider';
 import { NotificationProvider } from '@/components/notification-provider';
 import QueryProvider from '@/components/query-provider';
+import { AgentProvider } from '@/components/agent-provider';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit' });
@@ -37,7 +38,9 @@ export default function RootLayout({
                 <QueryProvider>
                     <NotificationProvider>
                         <AuthProvider>
-                            {children}
+                            <AgentProvider>
+                                {children}
+                            </AgentProvider>
                         </AuthProvider>
                     </NotificationProvider>
                 </QueryProvider>

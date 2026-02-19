@@ -40,37 +40,35 @@ export function TerminalScreen({ agent }: TerminalScreenProps) {
     // Initial fetch of recent history
     useEffect(() => {
         const fetchHistory = async () => {
-            const { data, error } = await supabase
-                .from('agent_conversations')
-                .select('*')
-                .eq('agent_id', agent.id)
-                .order('created_at', { ascending: false })
-                .limit(50);
+            try {
+                const data = await apiFetch<any[]>(`/agents/${agent.id}/chat`);
+                if (data) {
+                    const history: Message[] = data.reverse().map((msg: any) => ({
+                        id: msg.id,
+                        role: (msg.sender === 'user' ? 'user' : 'assistant') as "user" | "assistant",
+                        content: msg.content,
+                        timestamp: new Date(msg.created_at),
+                        isCommand: msg.content.startsWith('/terminal')
+                    }));
 
-            if (!error && data) {
-                const history: Message[] = data.reverse().map((msg: any) => ({
-                    id: msg.id,
-                    role: (msg.sender === 'user' ? 'user' : 'assistant') as "user" | "assistant",
-                    content: msg.content,
-                    timestamp: new Date(msg.created_at),
-                    isCommand: msg.content.startsWith('/terminal')
-                }));
+                    // Extract command text for the history state
+                    const userCommands = history
+                        .filter(m => m.role === 'user' && m.content.startsWith('/terminal '))
+                        .map(m => m.content.replace('/terminal ', ''));
 
-                // Extract command text for the history state
-                const userCommands = history
-                    .filter(m => m.role === 'user' && m.content.startsWith('/terminal '))
-                    .map(m => m.content.replace('/terminal ', ''));
+                    setCommandHistory(userCommands);
 
-                setCommandHistory(userCommands);
-
-                // Clean up /terminal prefix for display if it's a command
-                const cleanedHistory = history.map((msg: Message) => ({
-                    ...msg,
-                    content: msg.role === 'user' && msg.content.startsWith('/terminal ')
-                        ? msg.content.replace('/terminal ', '')
-                        : msg.content
-                }));
-                setMessages(cleanedHistory);
+                    // Clean up /terminal prefix for display if it's a command
+                    const cleanedHistory = history.map((msg: Message) => ({
+                        ...msg,
+                        content: msg.role === 'user' && msg.content.startsWith('/terminal ')
+                            ? msg.content.replace('/terminal ', '')
+                            : msg.content
+                    }));
+                    setMessages(cleanedHistory);
+                }
+            } catch (err) {
+                console.error('Failed to fetch terminal history:', err);
             }
         };
 

@@ -71,7 +71,7 @@ type TabType = 'agent' | 'security' | 'billing' | 'raw';
 
 function SettingsContent() {
     const { user, signOut } = useAuth();
-    const { agent, loading: agentLoading, refetch } = useAgent();
+    const { agent, loading: agentLoading, refetch, deployAgent, purgeAgent, startAgent, stopAgent } = useAgent();
     const { showNotification } = useNotification();
 
     const [activeTab, setActiveTab] = useState<TabType>('agent');
@@ -97,19 +97,13 @@ function SettingsContent() {
         const currentlyEnabled = desiredState?.enabled ?? false;
 
         try {
-            const { error } = await supabase
-                .from('agent_desired_state')
-                .update({ enabled: !currentlyEnabled })
-                .eq('agent_id', agent.id);
-
-            if (error) throw error;
-
-            showNotification(
-                currentlyEnabled ? 'Agent shutdown requested' : 'Agent startup requested',
-                'success'
-            );
-
-            setTimeout(() => refetch(), 1000);
+            if (currentlyEnabled) {
+                await stopAgent();
+                showNotification('Agent shutdown requested', 'success');
+            } else {
+                await startAgent();
+                showNotification('Agent startup requested', 'success');
+            }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Failed to toggle agent';
             showNotification(message, 'error');
@@ -118,27 +112,47 @@ function SettingsContent() {
         }
     };
 
+    const handleLaunchAgent = async () => {
+        setAgentToggling(true);
+        try {
+            await deployAgent();
+            showNotification('Agent launched successfully', 'success');
+        } catch (err: unknown) {
+            showNotification('Failed to launch agent', 'error');
+        } finally {
+            setAgentToggling(false);
+        }
+    };
+
+    const handleTerminateAgent = async () => {
+        if (!confirm('Are you sure you want to PERMANENTLY delete this agent? Everything will be wiped.')) return;
+        setAgentToggling(true);
+        try {
+            await purgeAgent();
+            showNotification('Agent terminated and removed', 'success');
+        } catch (err: unknown) {
+            showNotification('Failed to terminate agent', 'error');
+        } finally {
+            setAgentToggling(false);
+        }
+    };
+
     // Initialize state from agent once loaded
     React.useEffect(() => {
         if (agent) {
-            console.log('Populating settings from agent:', agent.id);
             setAgentName(agent.name || '');
 
-            // Handle both array and object formats for agent_desired_state
             const desiredStateData = agent.agent_desired_state;
             const desiredState = Array.isArray(desiredStateData)
                 ? desiredStateData[0]
                 : (desiredStateData as any);
 
             const config = (desiredState?.config || {}) as Record<string, unknown>;
-            console.log('Detected config:', config);
-
             const agents = (config.agents || {}) as Record<string, unknown>;
             const defaults = (agents.defaults || {}) as Record<string, unknown>;
 
             setSystemPrompt((defaults.system_prompt as string) || '');
 
-            // Check if API key is configured
             const models = (config.models || {}) as Record<string, unknown>;
             const providers = (models.providers || {}) as Record<string, unknown>;
             const hasKey = Object.values(providers || {}).some(
@@ -146,7 +160,6 @@ function SettingsContent() {
             );
             setApiKeyStatus(hasKey ? 'configured' : 'missing');
 
-            // Initialize JSON content if it's currently empty or if we just loaded a new agent
             setJsonContent(prev => {
                 if (!prev || prev === '{}' || prev === '') return JSON.stringify(config, null, 2);
                 return prev;
@@ -158,14 +171,11 @@ function SettingsContent() {
         if (!agent) return;
         setSaving(true);
         try {
-            await apiPatch(`/agents/${agent.id}`, {
-                name: agentName,
-            });
+            await apiPatch(`/agents/${agent.id}/config`, { name: agentName });
             showNotification('Agent updated', 'success');
             refetch();
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to save';
-            showNotification(message, 'error');
+            showNotification('Failed to save', 'error');
         } finally {
             setSaving(false);
         }
@@ -175,19 +185,52 @@ function SettingsContent() {
         if (!agent || !apiKey) return;
         setSaving(true);
         try {
+            const desiredStateData = agent.agent_desired_state;
+            const desiredState = Array.isArray(desiredStateData)
+                ? desiredStateData[0]
+                : (desiredStateData as any);
+
+            const currentConfig = (desiredState?.config || {}) as Record<string, any>;
+
+            // OpenClaw config structure for API keys
+            const newConfig = {
+                ...currentConfig,
+                models: {
+                    ...(currentConfig.models || {}),
+                    providers: {
+                        ...(currentConfig.models?.providers || {}),
+                        openrouter: {
+                            ...(currentConfig.models?.providers?.openrouter || {}),
+                            apiKey: apiKey
+                        }
+                    }
+                },
+                // Also update auth profiles for backward compatibility or different openclaw versions
+                auth: {
+                    ...(currentConfig.auth || {}),
+                    profiles: {
+                        ...(currentConfig.auth?.profiles || {}),
+                        default: {
+                            ...(currentConfig.auth?.profiles?.default || {}),
+                            provider: 'openrouter',
+                            mode: 'api_key',
+                            key: apiKey
+                        }
+                    }
+                }
+            };
+
             await apiPatch(`/agents/${agent.id}/config`, {
-                api_key: apiKey,
-                provider: 'openrouter',
+                config: newConfig
             });
+
             setApiKeyStatus('configured');
             setApiKey('');
             showNotification('API key saved', 'success');
             refetch();
-        } catch {
-            showNotification('API key updated', 'success');
-            setApiKeyStatus('configured');
-            setApiKey('');
-            refetch();
+        } catch (err: unknown) {
+            console.error('Failed to save API key:', err);
+            showNotification('Failed to update API key', 'error');
         } finally {
             setSaving(false);
         }
@@ -200,19 +243,13 @@ function SettingsContent() {
             let parsed;
             try {
                 parsed = JSON.parse(jsonContent);
-                console.log('Saving parsed config:', parsed);
             } catch (err: unknown) {
                 throw new Error('Invalid JSON format');
             }
 
-            const { error } = await supabase
-                .from('agent_desired_state')
-                .update({ config: parsed })
-                .eq('agent_id', agent.id);
+            await apiPatch(`/agents/${agent.id}/config`, { config: parsed });
 
-            if (error) throw error;
-
-            showNotification('Configuration updated via JSON', 'success');
+            showNotification('Configuration updated', 'success');
             refetch();
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Failed to save JSON';
@@ -222,7 +259,7 @@ function SettingsContent() {
         }
     };
 
-    if (agentLoading || !agent) {
+    if (agentLoading) {
         return (
             <div className="flex flex-col h-[100dvh]">
                 <div className="flex-1 flex items-center justify-center">
@@ -234,11 +271,25 @@ function SettingsContent() {
     }
 
     // Derived state for cleaner JSX
-    const desiredStateData = agent.agent_desired_state;
+    const desiredStateData = agent?.agent_desired_state;
     const desiredState = Array.isArray(desiredStateData)
         ? desiredStateData[0]
         : (desiredStateData as any);
     const currentlyEnabled = desiredState?.enabled ?? false;
+
+    const config = (desiredState?.config || {}) as Record<string, any>;
+    const rawGatewayToken = config.gateway?.auth?.token || '';
+
+    // Helper to check if a value is encrypted (format: IV:TEXT)
+    const isEncrypted = (val: string) => {
+        if (!val || typeof val !== 'string' || !val.includes(':')) return false;
+        const [iv, text] = val.split(':');
+        return iv.length === 32 && /^[0-9a-f]+$/i.test(iv) && /^[0-9a-f]+$/i.test(text);
+    };
+
+    const gatewayToken = isEncrypted(rawGatewayToken)
+        ? `${rawGatewayToken.substring(0, 8)}... (encrypted)`
+        : rawGatewayToken;
 
     return (
         <div className="flex flex-col h-[100dvh]">
@@ -280,101 +331,147 @@ function SettingsContent() {
             <main className="flex-1 overflow-y-auto scroll-smooth-mobile px-4 py-5 space-y-4 pb-24">
                 {activeTab === 'agent' && (
                     <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-4">
-                        {/* Agent Control */}
-                        <div className="glass-card rounded-2xl overflow-hidden p-5 flex items-center justify-between border border-primary/10 bg-white/[0.02]">
-                            <div className="flex items-center gap-3">
-                                <div className={cn(
-                                    "w-10 h-10 rounded-xl flex items-center justify-center transition-colors shadow-inner",
-                                    currentlyEnabled
-                                        ? "bg-green-500/10 text-green-500 border border-green-500/20"
-                                        : "bg-red-500/10 text-red-500 border border-red-500/20"
-                                )}>
-                                    <Power size={20} />
+                        {!agent ? (
+                            <div className="glass-card rounded-2xl overflow-hidden p-8 text-center border-2 border-dashed border-primary/20 bg-primary/5">
+                                <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
+                                    <Brain size={40} className="text-primary animate-pulse" />
                                 </div>
-                                <div>
-                                    <p className="font-bold text-sm">Agent Power</p>
-                                    <p className="text-[10px] uppercase font-black tracking-widest text-muted-foreground flex items-center gap-1.5">
-                                        <span className={cn(
-                                            "w-1.5 h-1.5 rounded-full inline-block",
-                                            agent.agent_actual_state?.status === 'running' ? "bg-green-500 animate-pulse" : "bg-muted-foreground/50"
-                                        )} />
-                                        {agent.agent_actual_state?.status || 'stopped'}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleToggleAgent}
-                                disabled={agentToggling}
-                                className={cn(
-                                    "px-4 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2",
-                                    currentlyEnabled
-                                        ? "bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20"
-                                        : "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-90"
-                                )}
-                            >
-                                {agentToggling ? (
-                                    <Loader2 size={14} className="animate-spin" />
-                                ) : (
-                                    currentlyEnabled ? (
-                                        <><Square size={14} fill="currentColor" /> Stop Agent</>
-                                    ) : (
-                                        <><Play size={14} fill="currentColor" /> Start Agent</>
-                                    )
-                                )}
-                            </button>
-                        </div>
-
-                        {/* Basic Info */}
-                        <CollapsibleCard title="Agent Information" icon={<User size={18} />} defaultOpen>
-                            <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Agent Name</label>
-                                    <input
-                                        type="text"
-                                        value={agentName}
-                                        onChange={(e) => setAgentName(e.target.value)}
-                                        placeholder="My Agent"
-                                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-bold"
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">System Prompt</label>
-                                    <textarea
-                                        value={systemPrompt}
-                                        onChange={(e) => setSystemPrompt(e.target.value)}
-                                        placeholder="Define your agent's personality and behavior..."
-                                        rows={6}
-                                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all resize-none text-sm leading-relaxed"
-                                    />
-                                </div>
-
+                                <h2 className="text-2xl font-black uppercase tracking-tighter mb-3 italic">Launch Your neural agent</h2>
+                                <p className="text-sm text-muted-foreground max-w-sm mx-auto mb-8 font-medium leading-relaxed">
+                                    Ready to deploy your customized OpenClaw agent? We'll initialize a secure sandbox environment and link your neural pathways.
+                                </p>
                                 <button
-                                    onClick={handleSaveAgent}
-                                    disabled={saving || !agentName}
-                                    className="w-full py-3 rounded-xl bg-primary hover:opacity-90 active:scale-[0.98] text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                                    onClick={handleLaunchAgent}
+                                    disabled={agentToggling}
+                                    className="w-full max-w-xs py-4 rounded-2xl bg-primary text-white font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/30 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 mx-auto"
                                 >
-                                    {saving ? <Loader2 size={16} className="animate-spin" /> : null}
-                                    Save Changes
+                                    Launch my agent
                                 </button>
                             </div>
-                        </CollapsibleCard>
-
-                        {/* Model & Intelligence */}
-                        <CollapsibleCard title="Intelligence" icon={<Brain size={18} />}>
-                            <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Current Model</label>
-                                    <div className="px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white/50 text-sm font-medium">
-                                        Using shared OpenRouter — auto-configured
-                                    </div>
+                        ) : (agent as any).isPurging ? (
+                            <div className="glass-card rounded-2xl overflow-hidden p-8 text-center border-2 border-dashed border-red-500/20 bg-red-500/5 animate-pulse">
+                                <div className="w-20 h-20 rounded-3xl bg-red-500/10 flex items-center justify-center mx-auto mb-6">
+                                    <Loader2 size={40} className="text-red-500 animate-spin" />
                                 </div>
-                                <p className="text-xs text-muted-foreground leading-relaxed">
-                                    Your agent uses our shared AI infrastructure by default. Customize this in the Raw Config for advanced setups.
+                                <h2 className="text-2xl font-black uppercase tracking-tighter mb-3 italic">Decommissioning Agent</h2>
+                                <p className="text-sm text-red-400/80 max-w-sm mx-auto mb-4 font-medium leading-relaxed">
+                                    Finalizing memory purge and dissolving neural pathways. This process cannot be undone.
                                 </p>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-red-400/50">
+                                    Worker Status: Cleaning up Docker & Filesystem...
+                                </div>
                             </div>
-                        </CollapsibleCard>
+                        ) : (
+                            <>
+                                {/* Agent Control */}
+                                <div className="glass-card rounded-2xl overflow-hidden p-5 flex items-center justify-between border border-primary/10 bg-white/[0.02]">
+                                    <div className="flex items-center gap-3">
+                                        <div className={cn(
+                                            "w-10 h-10 rounded-xl flex items-center justify-center transition-colors shadow-inner",
+                                            currentlyEnabled
+                                                ? "bg-green-500/10 text-green-500 border border-green-500/20"
+                                                : "bg-red-500/10 text-red-500 border border-red-500/20"
+                                        )}>
+                                            <Power size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-sm">Agent Power</p>
+                                            <p className="text-[10px] uppercase font-black tracking-widest text-muted-foreground flex items-center gap-1.5">
+                                                <span className={cn(
+                                                    "w-1.5 h-1.5 rounded-full inline-block",
+                                                    agent?.agent_actual_state?.status === 'running' ? "bg-green-500 animate-pulse" : "bg-muted-foreground/50"
+                                                )} />
+                                                {agent?.agent_actual_state?.status || 'stopped'}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={handleToggleAgent}
+                                        disabled={agentToggling}
+                                        className={cn(
+                                            "px-4 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2",
+                                            currentlyEnabled
+                                                ? "bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20"
+                                                : "bg-primary text-white shadow-lg shadow-primary/20 hover:opacity-90"
+                                        )}
+                                    >
+                                        {agentToggling ? (
+                                            <Loader2 size={14} className="animate-spin" />
+                                        ) : (
+                                            currentlyEnabled ? (
+                                                <><Square size={14} fill="currentColor" /> Stop Agent</>
+                                            ) : (
+                                                <><Play size={14} fill="currentColor" /> Start Agent</>
+                                            )
+                                        )}
+                                    </button>
+                                </div>
+
+                                {/* Basic Info */}
+                                <CollapsibleCard title="Agent Information" icon={<User size={18} />} defaultOpen>
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Agent Name</label>
+                                            <input
+                                                type="text"
+                                                value={agentName}
+                                                onChange={(e) => setAgentName(e.target.value)}
+                                                placeholder="My Agent"
+                                                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-bold"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">System Prompt</label>
+                                            <textarea
+                                                value={systemPrompt}
+                                                onChange={(e) => setSystemPrompt(e.target.value)}
+                                                placeholder="Define your agent's personality and behavior..."
+                                                rows={6}
+                                                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all resize-none text-sm leading-relaxed"
+                                            />
+                                        </div>
+
+                                        <button
+                                            onClick={handleSaveAgent}
+                                            disabled={saving || !agentName}
+                                            className="w-full py-3 rounded-xl bg-primary hover:opacity-90 active:scale-[0.98] text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                                        >
+                                            {saving ? <Loader2 size={16} className="animate-spin" /> : null}
+                                            Save Changes
+                                        </button>
+                                    </div>
+                                </CollapsibleCard>
+
+                                {/* Model & Intelligence */}
+                                <CollapsibleCard title="Intelligence" icon={<Brain size={18} />}>
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Current Model</label>
+                                            <div className="px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white/50 text-sm font-medium">
+                                                Using shared OpenRouter — auto-configured
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground leading-relaxed">
+                                            Your agent uses our shared AI infrastructure by default. Customize this in the Raw Config for advanced setups.
+                                        </p>
+                                    </div>
+                                </CollapsibleCard>
+
+                                {/* Terminate Section */}
+                                <div className="pt-8 pb-4">
+                                    <button
+                                        onClick={handleTerminateAgent}
+                                        disabled={agentToggling}
+                                        className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl border border-red-500/20 text-red-500 hover:bg-red-500/10 active:scale-[0.98] text-[11px] font-black uppercase tracking-widest transition-all disabled:opacity-50"
+                                    >
+                                        <AlertTriangle size={16} />
+                                        terminate agent (remove agent)
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -393,7 +490,7 @@ function SettingsContent() {
                                     </div>
                                 </div>
                                 <p className="text-xs text-muted-foreground leading-relaxed">
-                                    Your agent is currently isolated from the host system for maximum security.
+                                    Your agent is currently in an isolated environment for maximum security.
                                 </p>
                             </div>
                         </CollapsibleCard>
@@ -434,6 +531,26 @@ function SettingsContent() {
                                 >
                                     Update Key
                                 </button>
+                            </div>
+                        </CollapsibleCard>
+
+                        {/* Gateway Access */}
+                        <CollapsibleCard title="Gateway Access" icon={<Zap size={18} />} defaultOpen>
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground text-primary/80">API Gateway Token</label>
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 px-4 py-3 rounded-xl bg-primary/5 border border-primary/20 text-primary font-mono text-xs select-all flex items-center">
+                                            {gatewayToken || 'auto-generating...'}
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-muted-foreground leading-relaxed flex items-center gap-1.5">
+                                        <Shield size={10} className="text-primary/50" />
+                                        {isEncrypted(rawGatewayToken)
+                                            ? 'Token is encrypted at rest for your security. Update to change.'
+                                            : 'Use this token in your client applications to authenticate with this agent.'}
+                                    </p>
+                                </div>
                             </div>
                         </CollapsibleCard>
                     </div>
@@ -516,7 +633,7 @@ function SettingsContent() {
                         className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-red-400 hover:bg-red-400/10 active:scale-[0.98] text-[11px] font-black uppercase tracking-widest transition-all"
                     >
                         <LogOut size={16} />
-                        Terminate Session
+                        close session (logout)
                     </button>
                     {user && (
                         <p className="text-center text-[9px] font-black tracking-widest text-muted-foreground mt-2 uppercase opacity-50">

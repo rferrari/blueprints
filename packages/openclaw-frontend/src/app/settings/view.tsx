@@ -659,7 +659,7 @@ function SettingsContent() {
                                     <div className="flex flex-col items-center py-4 px-2 bg-white/5 rounded-2xl border border-white/5 shadow-inner">
                                         <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground mb-1">Usage</p>
                                         <span className="text-xl font-black text-amber-400">
-                                            ${(leaseBilling?.usageUsd ?? 0).toFixed(2)}
+                                            ${(leaseBilling?.usageUsd ?? 0).toFixed(3)}
                                         </span>
                                         <p className="text-[9px] text-muted-foreground/60 mt-0.5">spent</p>
                                     </div>

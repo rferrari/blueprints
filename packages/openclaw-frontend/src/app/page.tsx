@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { ChatScreen } from '@/components/chat-screen';
 import { TerminalScreen } from '@/components/terminal-screen';
 import { BottomNav } from '@/components/bottom-nav';
+import { LandingPage } from '@/components/landing-page';
 import { Terminal, Loader2, AlertTriangle } from 'lucide-react';
 
 function HomeContent() {
@@ -27,8 +28,10 @@ function HomeContent() {
         );
     }
 
-    // Not authenticated — auth-provider will redirect
-    if (!user) return null;
+    // Not authenticated — show landing page
+    if (!user) {
+        return <LandingPage />;
+    }
 
     // Redirect to settings if no agent found or if it's being purged
     if (!agentLoading && (!agent || (agent as any).isPurging) && !error) {

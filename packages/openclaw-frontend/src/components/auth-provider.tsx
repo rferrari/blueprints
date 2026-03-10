@@ -21,7 +21,19 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-const PUBLIC_PATHS = ['/login', '/signup'];
+const PUBLIC_PATHS = [
+    '/',
+    '/login',
+    '/signup',
+    '/about',
+    '/features',
+    '/pricing',
+    '/docs',
+    '/blog',
+    '/contact',
+    '/privacy',
+    '/terms'
+];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
@@ -52,10 +64,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (loading) return;
-        const isPublic = PUBLIC_PATHS.some(p => pathname.startsWith(p));
+        const isPublic = PUBLIC_PATHS.includes(pathname);
+        const isAuthPage = ['/login', '/signup'].includes(pathname);
+
         if (!user && !isPublic) {
             router.replace('/login');
-        } else if (user && isPublic) {
+        } else if (user && isAuthPage) {
             router.replace('/');
         }
     }, [user, loading, pathname, router]);

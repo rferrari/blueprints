@@ -71,7 +71,11 @@ fastify.setErrorHandler((error: any, request, reply) => {
 });
 
 // Register plugins
-await fastify.register(cors);
+await fastify.register(cors, {
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey'],
+});
 await fastify.register(sensible);
 
 // Rate Limiting

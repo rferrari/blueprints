@@ -33,6 +33,7 @@ export function useServiceStatus() {
                 setIsDown(true);
             }
         } catch (err) {
+            console.error('[useServiceStatus] Health check failed:', err);
             setIsDown(true);
         } finally {
             setLoading(false);

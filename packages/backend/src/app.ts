@@ -108,6 +108,10 @@ fastify.get('/health', { logLevel: 'silent' }, async () => {
     return { status: 'ok' };
 });
 
+fastify.get('/healthz', { logLevel: 'silent' }, async () => {
+    return { status: 'ok' };
+});
+
 // Protected routes group
 await fastify.register(async (authenticatedInstance) => {
     authenticatedInstance.register(authPlugin);

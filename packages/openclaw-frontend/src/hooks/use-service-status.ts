@@ -11,14 +11,24 @@ export function useServiceStatus() {
 
     const checkHealth = async () => {
         try {
-            const res = await fetch(`${API_URL}/health`, {
+            // Normalize API_URL to remove trailing slashes
+            const normalizedUrl = API_URL.replace(/\/+$/, '');
+            const healthUrl = `${normalizedUrl}/health`;
+            console.log(`[useServiceStatus] Checking health at: ${healthUrl}`);
+            const res = await fetch(healthUrl, {
                 method: 'GET',
                 cache: 'no-store',
             });
 
             if (res.ok) {
-                const data = await res.json();
-                setIsDown(data.status !== 'ok');
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const data = await res.json();
+                    setIsDown(data.status !== 'ok');
+                } else {
+                    const text = await res.text();
+                    setIsDown(text.trim() !== 'ok');
+                }
             } else {
                 setIsDown(true);
             }

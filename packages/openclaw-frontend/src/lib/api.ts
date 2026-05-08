@@ -17,7 +17,9 @@ export async function apiFetch<T = unknown>(
     options: RequestInit = {}
 ): Promise<T> {
     const headers = await getAuthHeaders();
-    const res = await fetch(`${API_URL}${path}`, {
+    // Normalize API_URL to remove trailing slashes
+    const normalizedUrl = API_URL.replace(/\/+$/, '');
+    const res = await fetch(`${normalizedUrl}${path}`, {
         ...options,
         headers: {
             ...headers,

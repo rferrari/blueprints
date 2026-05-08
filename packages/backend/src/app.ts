@@ -108,6 +108,15 @@ await fastify.register(apiKeysPlugin);
 await fastify.register(mcpPlugin);
 
 // Register routes
+fastify.get('/', async () => {
+    return {
+        status: 'ok',
+        message: 'Blueprints Backend API',
+        version: '1.0.0',
+        timestamp: new Date().toISOString()
+    };
+});
+
 fastify.get('/health', { logLevel: 'silent' }, async () => {
     return { status: 'ok' };
 });

@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import crypto from 'node:crypto';
 import { UpdateAgentConfigSchema, CreateAgentSchema, UserTier, TIER_CONFIG } from '@eliza-manager/shared';
 import { cryptoUtils } from '@eliza-manager/shared/crypto';
 

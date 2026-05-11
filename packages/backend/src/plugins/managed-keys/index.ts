@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import crypto from 'node:crypto';
 import {
     CreateManagedKeySchema,
     UpdateManagedKeySchema,

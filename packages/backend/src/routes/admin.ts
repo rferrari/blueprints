@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import crypto from 'node:crypto';
 import { cryptoUtils } from '@eliza-manager/shared/crypto';
 
 const adminRoutes: FastifyPluginAsync = async (fastify) => {

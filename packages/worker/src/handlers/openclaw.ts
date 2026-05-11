@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { supabase } from '../lib/supabase';
 import { logger } from '../lib/logger';
 import { docker } from '../lib/docker';

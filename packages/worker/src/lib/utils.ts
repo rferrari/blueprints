@@ -15,7 +15,7 @@ export function getAgentContainerName(agentId: string, framework: string = 'agen
  */
 export function getConfigHash(config: any): string {
     return crypto
-        .createHash('md5')
+        .createHash('sha256')
         .update(JSON.stringify(config))
         .digest('hex');
 }

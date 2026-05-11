@@ -40,14 +40,15 @@ const fastify = Fastify({
 // Global error handler for cleaner logs
 fastify.setErrorHandler((error: any, request, reply) => {
     const isSupabaseError = error.code?.startsWith('PGRST');
+    const isProd = process.env.NODE_ENV === 'production';
 
     fastify.log.error({
         msg: error.message,
         path: request.url,
         code: error.code,
-        details: error.details,
-        hint: error.hint, // PostgREST often provides hints
-        fullError: isSupabaseError ? error : undefined,
+        details: isProd ? undefined : error.details,
+        hint: isProd ? undefined : error.hint, // PostgREST often provides hints
+        fullError: (!isProd && isSupabaseError) ? error : undefined,
         isDatabaseError: isSupabaseError
     }, 'Critical Request Error');
 
@@ -71,8 +72,13 @@ fastify.setErrorHandler((error: any, request, reply) => {
 });
 
 // Register plugins
+const allowedOrigins = [
+    'https://blueprints-frontend.vercel.app',
+    'https://blueprints-oc.vercel.app'
+];
+
 await fastify.register(cors, {
-    origin: '*',
+    origin: process.env.NODE_ENV === 'development' ? '*' : allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey'],
 });
@@ -80,11 +86,11 @@ await fastify.register(sensible);
 
 // Rate Limiting
 await fastify.register(rateLimit, {
-    max: 100,
+    max: 60,
     timeWindow: '1 minute',
     keyGenerator: (request) => {
-        // Use session_id if available in body, fallback to IP
-        return (request.body as any)?.session_id || request.ip;
+        // Use IP + user combination to prevent spoofing
+        return `${request.ip}-${(request as any).userId || 'anonymous'}`;
     },
     skipOnError: true
 });

@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import crypto from 'node:crypto';
 import { cryptoUtils } from '@eliza-manager/shared/crypto';
 
 const adminRoutes: FastifyPluginAsync = async (fastify) => {
@@ -302,7 +303,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify) => {
                     metadata: { security_tier: 'custom' },
                     agents: { defaults: { workspace: '/root/.openclaw' } },
                     auth: { profiles: { default: { provider: 'anthropic', mode: 'api_key', token: '' } } },
-                    gateway: { auth: { mode: 'token', token: 'ADMIN_SECRET_' + Math.random().toString(36).substring(7) } }
+                    gateway: { auth: { mode: 'token', token: 'ADMIN_SECRET_' + crypto.randomBytes(6).toString('hex') } }
                 })
             }]);
 

@@ -4,6 +4,15 @@ const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-key-32-chars-long-
 const ENCRYPTION_KEY_BUFFER = Buffer.concat([Buffer.from(ENCRYPTION_KEY), Buffer.alloc(32)], 32);
 const ENCRYPT_MODE = (process.env.ENCRYPT_MODE || 'sensitive') as 'sensitive' | 'all' | 'none';
 
+if (process.env.NODE_ENV === 'production') {
+    if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY === 'default-key-32-chars-long-12345') {
+        throw new Error("ENCRYPTION_KEY must be securely set in production");
+    }
+    if (ENCRYPT_MODE === 'none') {
+        throw new Error("ENCRYPT_MODE='none' is not allowed in production");
+    }
+}
+
 export const cryptoUtils = {
     /**
      * Encrypts a string using AES-256-CBC

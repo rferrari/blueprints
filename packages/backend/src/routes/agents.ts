@@ -259,7 +259,7 @@ const agentRoutes: FastifyPluginAsync = async (fastify) => {
             const gwAuth = initialConfig.gateway.auth;
             // Ensure token is generated or updated if placeholder
             if (!gwAuth.token || gwAuth.token === 'auto-generated-on-creation') {
-                gwAuth.token = Buffer.from(Math.random().toString()).toString('base64').substring(0, 16);
+                gwAuth.token = crypto.randomBytes(12).toString('hex');
             }
         }
 

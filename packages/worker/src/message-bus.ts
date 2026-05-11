@@ -76,6 +76,9 @@ export async function handleUserMessage(payload: any) {
                     ? 'help'
                     : content.replace('/terminal ', '').trim();
 
+            const COMMAND_WHITELIST = ['ls', 'pwd', 'whoami', 'echo', 'cat', 'node -v', 'npm -v', 'bun -v', 'date'];
+            const baseCommand = command.split(' ')[0];
+
             if (!command || command === 'help') {
                 await supabase.from('agent_conversations').insert([{
                     agent_id,
@@ -85,11 +88,23 @@ export async function handleUserMessage(payload: any) {
 
 Commands prefixed with /terminal execute inside the agent container.
 
+Available commands: ${COMMAND_WHITELIST.join(', ')}
+
 Examples:
 /terminal ls
 /terminal whoami
-/terminal node -v
 `
+                }]);
+                return;
+            }
+
+            if (!COMMAND_WHITELIST.includes(baseCommand)) {
+                logger.warn(`Message Bus: [${id}] Blocked unauthorized terminal command: ${command}`);
+                await supabase.from('agent_conversations').insert([{
+                    agent_id,
+                    user_id,
+                    sender: 'agent',
+                    content: `🚫 Error: Command "${baseCommand}" is not allowed. Only basic commands are permitted for security.`
                 }]);
                 return;
             }

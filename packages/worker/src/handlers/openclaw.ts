@@ -82,7 +82,7 @@ export async function startOpenClawAgent(
                 bind: 'lan',
                 auth: {
                     mode: 'token',
-                    token: config.gateway?.auth?.token || Buffer.from(Math.random().toString()).toString('base64').substring(0, 16),
+                    token: config.gateway?.auth?.token || crypto.randomBytes(12).toString('hex'),
                     ...(config.gateway?.auth || {}),
                 },
                 http: {
@@ -97,7 +97,7 @@ export async function startOpenClawAgent(
 
         // Ensure token is generated even if gateway.auth existed but token was missing
         if (!configWithDefaults.gateway.auth.token || configWithDefaults.gateway.auth.token === 'auto-generated-on-creation') {
-            configWithDefaults.gateway.auth.token = Buffer.from(Math.random().toString()).toString('base64').substring(0, 16);
+            configWithDefaults.gateway.auth.token = crypto.randomBytes(12).toString('hex');
         }
 
         const decrypted = cryptoUtils.decryptConfig(configWithDefaults);

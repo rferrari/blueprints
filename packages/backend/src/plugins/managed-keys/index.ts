@@ -69,8 +69,7 @@ const buildAgentConfig = (selectedKey: any, existingConfig: any, framework: stri
                     }
                 },
                 auth: {
-                    mode: 'token',
-                    token: Buffer.from(Math.random().toString()).toString('base64').substring(0, 16)
+                    token: crypto.randomBytes(12).toString('hex')
                 }
             },
             ...frameworkOverrides,
@@ -79,7 +78,7 @@ const buildAgentConfig = (selectedKey: any, existingConfig: any, framework: stri
         // Ensure token exists even if gateway existed but auth/token didn't
         if (!config.gateway.auth) config.gateway.auth = { mode: 'token' };
         if (!config.gateway.auth.token) {
-            config.gateway.auth.token = Buffer.from(Math.random().toString()).toString('base64').substring(0, 16);
+            config.gateway.auth.token = crypto.randomBytes(12).toString('hex');
         }
 
         return config;
